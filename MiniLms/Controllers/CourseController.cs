@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using MiniLms.Interfaces;
 using MiniLms.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -223,8 +223,16 @@ namespace MiniLms.Controllers
 
                 string sourceText = string.Join("\n\n", documentTexts);
                 string summaryPrompt = $@"
-                    Aşağıdaki ders dokümanını öğrencinin hızlıca anlayacağı şekilde Türkçe özetle.
-                    En önemli konu başlıklarını, dokümanın kapsamını ve sınav/çalışma açısından dikkat edilmesi gereken noktaları kısa paragraflarla ver.
+                    Aşağıdaki ders dokümanını birebir akademik ders rehberi formatında Türkçe olarak özetle.
+
+                    GÖRSEL VE BİÇİMLENDİRME FORMATI (TAM OLARAK UYGULA):
+                    1. En başa BÜYÜK HARFLERLE ders dokümanının adını içeren bir ana başlık yaz (Örn: # SAYI SİSTEMLERİ VE SAYISAL ELEKTRONİK DERS REHBERİ).
+                    2. Başlığın hemen altına 2-3 cümlelik genel giriş açıklamasını yaz. Kesinlikle '---' veya '--' gibi ayırıcı çizgiler KULLANMA.
+                    3. Konuları Numaralandırılmış Bölüm Başlıkları şeklinde yaz (Örn: '1. ANALOG VE SAYISAL BÜYÜKLÜK KAVRAMI', '2. İKİLİK (BINARY) SAYI SİSTEMİ', '2.1. Taban ve Terminoloji').
+                    4. Tanım ve terimleri **Tanım Adı:** Açıklama formatında koyu bold yaparak yaz (Örn: **Analog Büyüklük:** ..., **Taban:** 2, **Terminoloji:** En sağdaki bit **LSB**).
+                    5. En sonda 'SINAV İÇİN DİKKAT EDİLMESİ GEREKEN NOKTALAR' başlığı altında önemli püf noktalarını ver.
+                    6. KESİNLİKLE madde işareti (• veya -) ve ayırıcı çizgi (---) KULLANMA. Tanımları paragraflar ve kalın terim isimleriyle ayır.
+                    7. Kesinlikle LaTeX dolar işareti ($) kullanma.
 
                     DOKÜMAN ADI:
                     {document.FileName}
