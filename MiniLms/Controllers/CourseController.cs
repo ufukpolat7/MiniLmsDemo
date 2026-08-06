@@ -482,7 +482,7 @@ namespace MiniLms.Controllers
                 {
                     summaryId = s.Id,
                     documentName = s.CourseDocument != null ? s.CourseDocument.FileName : "Doküman",
-                    documentPath = s.CourseDocument != null ? s.CourseDocument.FilePath : "",
+                    documentPath = s.CourseDocument != null ? (s.CourseDocument.FilePath.StartsWith("/") ? s.CourseDocument.FilePath : "/" + s.CourseDocument.FilePath.Replace("\\", "/")) : "",
                     summaryText = s.SummaryText,
                     createdAt = s.CreatedAt.ToString("dd.MM.yyyy HH:mm")
                 })

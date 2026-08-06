@@ -6,6 +6,24 @@
     var enrolledStudents = ViewBag.EnrolledStudentSummaries as List<MiniLms.ViewModels.EnrolledStudentSummaryDto> ?? new List<MiniLms.ViewModels.EnrolledStudentSummaryDto>();
 }
 
+<style>
+    .ql-editor h1, .ql-editor h2, .ql-editor h3,
+    #aiResponseText h1, #aiResponseText h2, #aiResponseText h3,
+    #selectedStudentSummariesContent h1, #selectedStudentSummariesContent h2, #selectedStudentSummariesContent h3 {
+        color: #0066ff !important;
+        font-weight: 700 !important;
+    }
+    .ql-toolbar.ql-snow {
+        border-radius: 6px 6px 0 0;
+        background: #f8fafc;
+        border-color: #cbd5e1;
+    }
+    .ql-container.ql-snow {
+        border-radius: 0 0 6px 6px;
+        border-color: #cbd5e1;
+    }
+</style>
+
 <div>
     @if (TempData["SuccessMessage"] != null)
     {
@@ -328,24 +346,28 @@
     </div>
 </div>
 
-<!-- 🎯 ÖZET DÜZENLEME MODALI -->
-<div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true">
+<!-- 🎯 ÖZET DÜZENLEME MODALI (WORD BENZERİ ZENGİN METİN EDİTÖRÜ) -->
+<div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content">
+        <div class="modal-content shadow-lg">
             <div class="modal-header bg-primary text-white py-2">
-                <h6 class="modal-title fw-bold" id="editSummaryModalTitle"><i class="bi bi-pencil-square"></i> Özet Düzenle (ID: #<span id="editSummaryIdText"></span>)</h6>
+                <h6 class="modal-title fw-bold" id="editSummaryModalTitle"><i class="bi bi-file-earmark-word"></i> Özet Düzenle (ID: #<span id="editSummaryIdText"></span>)</h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body p-3">
                 <input type="hidden" id="editSummaryId" />
-                <div class="mb-3">
-                    <label class="form-label small fw-bold text-secondary">Özet İçeriği</label>
-                    <textarea class="form-control font-monospace" id="editSummaryContent" rows="12" style="font-size: 13px; line-height: 1.5;"></textarea>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold text-secondary d-flex align-items-center gap-1">
+                        <i class="bi bi-fonts text-primary"></i> Microsoft Word Rehber Düzenleyici (Zengin Metin Editörü)
+                    </label>
+                    <div id="quillEditorContainer" style="background: #ffffff; border-radius: 4px;">
+                        <div id="quillEditor" style="min-height: 280px; font-size: 15px; line-height: 1.6;"></div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
-                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnSaveEditedSummary"><i class="bi bi-check-circle"></i> Kaydet</button>
+                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnSaveEditedSummary"><i class="bi bi-check-circle"></i> Değişiklikleri Kaydet</button>
             </div>
         </div>
     </div>
@@ -429,6 +451,8 @@
 
 @section Scripts {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
     <script>
         $(document).ready(function () {
         var quizState = {
@@ -533,6 +557,42 @@
             loadDocumentSummary(docId, false);
         });
 
+        var quill = new Quill('#quillEditor', {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    [{ 'size': ['small', false, 'large', 'huge'] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'color': ['#000000', '#0066ff', '#0056b3', '#dc3545', '#198754', '#ffc107', '#6c757d', '#6610f2', '#6f42c1', '#d63384', '#fd7e14', '#20c997', '#0dcaf0', '#ffffff'] }, 
+                     { 'background': ['#ffffff', '#fff3cd', '#d1e7dd', '#f8d7da', '#cff4fc', '#e2e3e5', '#f8fafc', '#e0e7ff', '#fee2e2', '#dcfce7'] }],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    [{ 'align': [] }],
+                    ['clean']
+                ]
+            }
+        });
+
+        function openEditModalWithSummary(summaryId, rawText) {
+            $("#editSummaryId").val(summaryId);
+            $("#editSummaryIdText").text(summaryId);
+
+            if ($("#studentSummariesListModal").hasClass("show")) {
+                studentSummariesListModal.hide();
+            }
+
+            editSummaryModal.show();
+
+            var formattedHtml = formatAiResponseToHtml(rawText);
+
+            setTimeout(function () {
+                if (quill) {
+                    quill.setText('');
+                    quill.clipboard.dangerouslyPasteHTML(0, formattedHtml);
+                }
+            }, 200);
+        }
+
         // 🎯 Yeniden AI Özeti Üret (Force Refresh)
         $("#btnRefreshSummary").click(function () {
             if (activeSummaryState.documentId) {
@@ -545,18 +605,15 @@
         // 🎯 Özeti Düzenle Modalını Aç
         $("#btnEditSummary").click(function () {
             if (!activeSummaryState.summaryId) return;
-            $("#editSummaryId").val(activeSummaryState.summaryId);
-            $("#editSummaryIdText").text(activeSummaryState.summaryId);
-            $("#editSummaryContent").val(activeSummaryState.rawText);
-            editSummaryModal.show();
+            openEditModalWithSummary(activeSummaryState.summaryId, activeSummaryState.rawText);
         });
 
         // 🎯 Düzenlenen Özeti Kaydet (Öğrenci veya Öğretmen)
         $("#btnSaveEditedSummary").click(function () {
             var summaryId = $("#editSummaryId").val();
-            var updatedText = $("#editSummaryContent").val();
+            var updatedText = quill.root.innerHTML;
 
-            if (!updatedText.trim()) {
+            if (!quill.getText().trim()) {
                 alert("Özet metni boş olamaz.");
                 return;
             }
@@ -659,10 +716,7 @@
                         activeSummaryState.documentId = data.documentId;
                         activeSummaryState.rawText = data.summaryText;
 
-                        $("#editSummaryId").val(data.summaryId);
-                        $("#editSummaryIdText").text(data.summaryId);
-                        $("#editSummaryContent").val(data.summaryText);
-                        editSummaryModal.show();
+                        openEditModalWithSummary(data.summaryId, data.summaryText);
                     } else {
                         alert(data.message);
                     }
@@ -939,6 +993,11 @@
         function formatAiResponseToHtml(text) {
             if (!text) return "";
 
+            // Eğer önceden HTML olarak kaydedildiyse (Quill editörü)
+            if (text.indexOf("<p>") !== -1 || text.indexOf("<strong>") !== -1 || text.indexOf("<h") !== -1 || text.indexOf("<ul>") !== -1 || text.indexOf("<ol>") !== -1 || text.indexOf("<em>") !== -1 || text.indexOf("<u>") !== -1) {
+                return text;
+            }
+
             // 1. PDF Gürültü ve Dipnot Temizliği
             text = text.replace(/Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?/gi, '');
             text = text.replace(/Zafer\s+Cömert/gi, '');
@@ -947,37 +1006,37 @@
             text = text.replace(/(\b\d+\s+){3,}\.?(\s*\d+)*/g, ' ');
             text = text.replace(/\n{3,}/g, '\n\n');
 
-            // XSS güvenliği için ham HTML escape edilir
-            let html = $("<div>").text(text).html();
-
             // 2. Metin başlarındaki ve içindeki tüm madde işaretlerini (• veya -) temizle
-            html = html.replace(/^[•\-]\s*/gm, '');
+            text = text.replace(/^[•\-]\s*/gm, '');
+            text = text.replace(/^-{2,}\s*$/gm, '');
 
-            // 3. Ayırıcı Çizgileri (--- veya --) tamamen kaldır
-            html = html.replace(/^-{2,}\s*$/gm, '');
+            // 3. Dolar işaretlerini temiz matematik kutusuna çevir
+            text = text.replace(/\$+([^$]+)\$+/g, '<code>$1</code>');
 
-            // 4. Dolar işaretlerini ($1 + 1 = 10$) temiz matematik kutusuna çevir
-            html = html.replace(/\$+([^$]+)\$+/g, '<code style="background-color: #f8fafc; color: #000000; padding: 2px 6px; border-radius: 4px; font-weight: 700; border: 1px solid #cbd5e1;">$1</code>');
+            // 4. Ana Rehber Başlığı -> <h2>
+            text = text.replace(/^(?:#\s*|\*\*)?([A-ZÇĞİÖŞÜ0-9\s\-]+DERS REHBERİ[A-ZÇĞİÖŞÜ0-9\s\-]*)(?:\*\*)?$/gm, '<h2>$1</h2>');
 
-            // 5. Ana Rehber Başlığı (Örn: SAYI SİSTEMLERİ VE SAYISAL ELEKTRONİK DERS REHBERİ) -> Parlak Mavi Büyük Bold
-            html = html.replace(/^(?:#\s*|\*\*)?([A-ZÇĞİÖŞÜ0-9\s\-]+DERS REHBERİ[A-ZÇĞİÖŞÜ0-9\s\-]*)(?:\*\*)?$/gm, function(match, title) {
-                return '<div style="color: #0066ff; font-weight: 800; font-size: 1.3rem; margin-top: 0.4rem; margin-bottom: 0.6rem; text-transform: uppercase; line-height: 1.3;">' + title.trim() + '</div>';
-            });
+            // 5. Numaralandırılmış Bölüm ve Alt Başlıklar -> <h3>
+            text = text.replace(/^(?:##\s*|###\s*|\*\*)?(\d+\.?[0-9\.]*\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|[A-Z]\.\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|SINAV İÇİN[A-ZÇĞİÖŞÜ\s\-]+)(?:\*\*)?$/gm, '<h3>$1</h3>');
 
-            // 6. Numaralandırılmış Bölüm ve Alt Başlıklar (1. ANALOG..., 2.2. İkilik..., A. İkilik..., SINAV İÇİN...)
-            html = html.replace(/^(?:##\s*|###\s*|\*\*)?(\d+\.?[0-9\.]*\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|[A-Z]\.\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|SINAV İÇİN[A-ZÇĞİÖŞÜ\s\-]+)(?:\*\*)?$/gm, function(match, header) {
-                return '<div style="color: #0066ff; font-weight: 700; font-size: 1.15rem; margin-top: 1.2rem; margin-bottom: 0.4rem; line-height: 1.35;">' + header.trim() + '</div>';
-            });
+            // 6. Bold Terimler -> <strong>
+            text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
-            // 7. Bold Terimler (**Terim Adı:**) -> Koyu Siyah Bold
-            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight: 700; color: #000000;">$1</strong>');
-            html = html.replace(/\*([^*]+)\*/g, '<em style="color: #334155; font-style: italic;">$1</em>');
+            // 7. Satır ve Paragraf Yapısı
+            var lines = text.split(/\n\n+/);
+            var html = "";
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line) continue;
+                if (line.startsWith('<h2') || line.startsWith('<h3')) {
+                    html += line;
+                } else {
+                    html += '<p>' + line.replace(/\n/g, '<br/>') + '</p>';
+                }
+            }
 
-            // 8. Satır ve Paragraf Araları
-            html = html.replace(/\n\n/g, '<div style="height: 10px;"></div>');
-            html = html.replace(/\n/g, '<br/>');
-
-            return '<div style="color: #1e293b; font-size: 1.02rem; line-height: 1.6;">' + html + '</div>';
+            return html || '<p>' + text + '</p>';
         }
 
         function escapeHtml(value) {

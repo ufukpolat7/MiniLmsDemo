@@ -86,19 +86,21 @@
     </div>
 </div>
 
-<!-- 🎯 ÖZET DÜZENLEME MODALI -->
+<!-- 🎯 ÖZET DÜZENLEME MODALI (WORD BENZERİ ZENGİN METİN EDİTÖRÜ) -->
 <div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content">
+        <div class="modal-content shadow-lg">
             <div class="modal-header bg-warning text-white py-2">
-                <h6 class="modal-title fw-bold"><i class="bi bi-pencil-square"></i> Özeti Düzenle</h6>
+                <h6 class="modal-title fw-bold text-white"><i class="bi bi-file-earmark-word"></i> Özeti Düzenle</h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body p-3">
                 <input type="hidden" id="editSummaryId" />
-                <div class="mb-3">
-                    <label class="form-label small fw-bold text-secondary">Özet Metni</label>
-                    <textarea class="form-control font-monospace" id="editSummaryTextContent" rows="12" style="font-size: 13px; line-height: 1.5;"></textarea>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold text-secondary mb-2"><i class="bi bi-fonts text-primary"></i> Microsoft Word Rehber Düzenleyici</label>
+                    <div id="quillEditorMySummariesContainer" style="background: #ffffff; border-radius: 4px;">
+                        <div id="quillEditorMySummaries" style="min-height: 280px; font-size: 15px; line-height: 1.6;"></div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer py-2">
@@ -109,15 +111,52 @@
     </div>
 </div>
 
+<style>
+    .ql-editor h1, .ql-editor h2, .ql-editor h3, #viewSummaryContent h1, #viewSummaryContent h2, #viewSummaryContent h3 {
+        color: #0066ff !important;
+        font-weight: 700 !important;
+    }
+    .ql-toolbar.ql-snow {
+        border-radius: 6px 6px 0 0;
+        background: #f8fafc;
+        border-color: #cbd5e1;
+    }
+    .ql-container.ql-snow {
+        border-radius: 0 0 6px 6px;
+        border-color: #cbd5e1;
+    }
+</style>
+
 @section Scripts {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
     <script>
         $(document).ready(function () {
             var viewModal = new bootstrap.Modal(document.getElementById("viewSummaryModal"));
             var editModal = new bootstrap.Modal(document.getElementById("editSummaryModal"));
 
+            var quillMySummaries = new Quill('#quillEditorMySummaries', {
+                theme: 'snow',
+                modules: {
+                    toolbar: [
+                        [{ 'header': [1, 2, 3, false] }],
+                        [{ 'size': ['small', false, 'large', 'huge'] }],
+                        ['bold', 'italic', 'underline', 'strike'],
+                        [{ 'color': ['#000000', '#0066ff', '#0056b3', '#dc3545', '#198754', '#ffc107', '#6c757d', '#6610f2', '#6f42c1', '#d63384', '#fd7e14', '#20c997', '#0dcaf0', '#ffffff'] }, 
+                         { 'background': ['#ffffff', '#fff3cd', '#d1e7dd', '#f8d7da', '#cff4fc', '#e2e3e5', '#f8fafc', '#e0e7ff', '#fee2e2', '#dcfce7'] }],
+                        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                        [{ 'align': [] }],
+                        ['clean']
+                    ]
+                }
+            });
+
             function formatAiResponseToHtml(rawText) {
                 if (!rawText) return "";
+                if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1 || rawText.indexOf("<ul>") !== -1 || rawText.indexOf("<ol>") !== -1 || rawText.indexOf("<div") !== -1) {
+                    return rawText;
+                }
                 var formatted = rawText;
                 formatted = formatted.replace(/^---$/gm, '');
                 formatted = formatted.replace(/^--$/gm, '');
@@ -158,7 +197,7 @@
                 $.get('@Url.Action("GetSummaryById", "Course")', { summaryId: summaryId }, function (res) {
                     if (res.success) {
                         $("#editSummaryId").val(res.summaryId);
-                        $("#editSummaryTextContent").val(res.summaryText);
+                        quillMySummaries.root.innerHTML = formatAiResponseToHtml(res.summaryText);
                         editModal.show();
                     } else {
                         alert(res.message);
@@ -168,7 +207,7 @@
 
             $("#btnSaveEditedSummaryModal").click(function () {
                 var summaryId = $("#editSummaryId").val();
-                var text = $("#editSummaryTextContent").val();
+                var text = quillMySummaries.root.innerHTML;
 
                 $.post('@Url.Action("UpdateSummary", "Course")', { summaryId: summaryId, summaryText: text }, function (res) {
                     if (res.success) {
