@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using MiniLms.Models;
 
@@ -20,6 +20,7 @@ namespace MiniLms.Data
         public DbSet<CourseDocument> CourseDocuments { get; set; }
         public DbSet<Enrollment> Enrollments { get; set; }
         public DbSet<Student> Students { get; set; }
+        public DbSet<DocumentSummary> DocumentSummaries { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -51,6 +52,18 @@ namespace MiniLms.Data
                 .WithMany(c => c.Documents)
                 .HasForeignKey(d => d.CourseId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Entity<DocumentSummary>()
+                .HasOne(s => s.Course)
+                .WithMany()
+                .HasForeignKey(s => s.CourseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<DocumentSummary>()
+                .HasOne(s => s.CourseDocument)
+                .WithMany()
+                .HasForeignKey(s => s.CourseDocumentId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

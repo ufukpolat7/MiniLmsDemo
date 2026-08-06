@@ -1,0 +1,199 @@
+@model IEnumerable<MiniLms.Models.DocumentSummary>
+
+@{
+    ViewData["Title"] = "Özel Ders Özetlerim";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="fw-bold text-primary mb-1"><i class="bi bi-bookmark-star-fill text-warning"></i> Özel Ders Özetlerim</h3>
+            <p class="text-muted small mb-0">Tüm dersler için yapay zekayla çıkardığınız kişisel ders özetleriniz ve çalışma notlarınız.</p>
+        </div>
+        <span class="badge bg-primary fs-6 px-3 py-2">Toplam @Model.Count() Özet</span>
+    </div>
+
+    @if (Model != null && Model.Any())
+    {
+        <div class="row row-cols-1 row-cols-md-2 g-4">
+            @foreach (var summary in Model)
+            {
+                <div class="col" id="my-summary-card-@summary.Id">
+                    <div class="card h-100 shadow-sm border-0 bg-white hover-shadow transition">
+                        <div class="card-header bg-light border-0 py-3 d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="badge bg-primary fw-bold me-1">ID: #@summary.Id</span>
+                                <span class="badge bg-secondary">@(summary.Course?.CourseCode ?? "DERS")</span>
+                            </div>
+                            <small class="text-muted" style="font-size: 11px;">⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
+                        </div>
+                        <div class="card-body">
+                            <h6 class="fw-bold text-dark mb-2 text-truncate" title="@summary.CourseDocument?.FileName">
+                                <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
+                            </h6>
+                            <p class="text-muted small mb-3">
+                                <strong>Ders:</strong> @(summary.Course?.Title ?? "Bilinmeyen Ders")
+                            </p>
+                            <div class="bg-light p-3 rounded border text-muted small" style="max-height: 100px; overflow: hidden; position: relative;">
+                                @(summary.SummaryText.Length > 200 ? summary.SummaryText.Substring(0, 200) + "..." : summary.SummaryText)
+                            </div>
+                        </div>
+                        <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
+                            <a asp-controller="Course" asp-action="Details" asp-route-id="@summary.CourseId" class="btn btn-xs btn-outline-secondary btn-sm">
+                                <i class="bi bi-box-arrow-up-right"></i> Derse Git
+                            </a>
+                            <div class="d-flex gap-1">
+                                <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName"><i class="bi bi-eye"></i> Oku</button>
+                                <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id"><i class="bi bi-pencil-square"></i> Düzenle</button>
+                                <button type="button" class="btn btn-xs btn-danger btn-sm btn-delete-card" data-id="@summary.Id"><i class="bi bi-trash"></i> Sil</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="card shadow-sm p-5 text-center my-4">
+            <div class="mb-3">
+                <i class="bi bi-journal-bookmark text-muted" style="font-size: 3rem;"></i>
+            </div>
+            <h5 class="fw-bold text-secondary">Henüz Kaydedilmiş Ders Özetiniz Bulunmuyor</h5>
+            <p class="text-muted small">Kayıtlı olduğunuz derslerin detay sayfasına giderek <strong>"Özetle"</strong> butonuna tıkladığınızda özetleriniz otomatik olarak buraya kaydedilecektir.</p>
+            <div>
+                <a asp-controller="Course" asp-action="Index" class="btn btn-primary btn-sm"><i class="bi bi-book"></i> Derslere Göz At</a>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- 🎯 ÖZET OKUMA / GÖRÜNTÜLEME MODALI -->
+<div class="modal fade" id="viewSummaryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="viewSummaryModalTitle"><i class="bi bi-book-half"></i> Özet Detayı</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <div id="viewSummaryContent" class="p-3 bg-light rounded text-dark" style="max-height: 450px; overflow-y: auto; line-height: 1.6;"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 🎯 ÖZET DÜZENLEME MODALI -->
+<div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-white py-2">
+                <h6 class="modal-title fw-bold"><i class="bi bi-pencil-square"></i> Özeti Düzenle</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editSummaryId" />
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-secondary">Özet Metni</label>
+                    <textarea class="form-control font-monospace" id="editSummaryTextContent" rows="12" style="font-size: 13px; line-height: 1.5;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-warning text-white btn-sm fw-bold" id="btnSaveEditedSummaryModal"><i class="bi bi-check-circle"></i> Kaydet</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            var viewModal = new bootstrap.Modal(document.getElementById("viewSummaryModal"));
+            var editModal = new bootstrap.Modal(document.getElementById("editSummaryModal"));
+
+            function formatAiResponseToHtml(rawText) {
+                if (!rawText) return "";
+                var formatted = rawText;
+                formatted = formatted.replace(/^---$/gm, '');
+                formatted = formatted.replace(/^--$/gm, '');
+                formatted = formatted.replace(/✓/g, '');
+                formatted = formatted.replace(/^# (.*$)/gim, '<h4 class="text-primary fw-bold mt-2 mb-3 text-uppercase border-bottom pb-2" style="color: #0066ff !important; font-size: 1.4rem;">$1</h4>');
+                formatted = formatted.replace(/^## (.*$)/gim, '<h5 class="text-dark fw-bold mt-3 mb-2" style="font-size: 1.15rem;">$1</h5>');
+                formatted = formatted.replace(/^### (.*$)/gim, '<h6 class="text-dark fw-bold mt-2 mb-1" style="font-size: 1.05rem;">$1</h6>');
+                formatted = formatted.replace(/^(\d+(\.\d+)*\.\s+.*$)/gim, '<h5 class="fw-bold mt-3 mb-2" style="color: #0056b3;">$1</h5>');
+                formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #000000; font-weight: 800;">$1</strong>');
+                formatted = formatted.replace(/\*(.*?)\*/g, '<em class="text-secondary">$1</em>');
+                formatted = formatted.replace(/\n\n/g, '</p><p class="mb-2" style="font-size: 1.05rem; line-height: 1.6;">');
+                formatted = formatted.replace(/\n/g, '<br />');
+
+                if (!formatted.startsWith('<h') && !formatted.startsWith('<p')) {
+                    formatted = '<p class="mb-2" style="font-size: 1.05rem; line-height: 1.6;">' + formatted + '</p>';
+                }
+                return formatted;
+            }
+
+            $(".btn-view-modal").click(function () {
+                var summaryId = $(this).data("id");
+                var title = $(this).data("title");
+                $("#viewSummaryModalTitle").text("Özet Detayı - " + title);
+                $("#viewSummaryContent").html("<span class='text-muted'>Yükleniyor...</span>");
+                viewModal.show();
+
+                $.get('@Url.Action("GetSummaryById", "Course")', { summaryId: summaryId }, function (res) {
+                    if (res.success) {
+                        $("#viewSummaryContent").html(formatAiResponseToHtml(res.summaryText));
+                    } else {
+                        $("#viewSummaryContent").html("<span class='text-danger'>" + res.message + "</span>");
+                    }
+                });
+            });
+
+            $(".btn-edit-modal").click(function () {
+                var summaryId = $(this).data("id");
+                $.get('@Url.Action("GetSummaryById", "Course")', { summaryId: summaryId }, function (res) {
+                    if (res.success) {
+                        $("#editSummaryId").val(res.summaryId);
+                        $("#editSummaryTextContent").val(res.summaryText);
+                        editModal.show();
+                    } else {
+                        alert(res.message);
+                    }
+                });
+            });
+
+            $("#btnSaveEditedSummaryModal").click(function () {
+                var summaryId = $("#editSummaryId").val();
+                var text = $("#editSummaryTextContent").val();
+
+                $.post('@Url.Action("UpdateSummary", "Course")', { summaryId: summaryId, summaryText: text }, function (res) {
+                    if (res.success) {
+                        editModal.hide();
+                        alert("Özet başarıyla güncellendi.");
+                        location.reload();
+                    } else {
+                        alert("Hata: " + res.message);
+                    }
+                });
+            });
+
+            $(".btn-delete-card").click(function () {
+                var summaryId = $(this).data("id");
+                if (confirm("ID #" + summaryId + " numaralı özeti kalıcı olarak silmek istediğinize emin misiniz?")) {
+                    $.post('@Url.Action("DeleteSummary", "Course")', { summaryId: summaryId }, function (res) {
+                        if (res.success) {
+                            $("#my-summary-card-" + summaryId).fadeOut(300, function () { $(this).remove(); });
+                            alert("Özet silindi.");
+                        } else {
+                            alert("Hata: " + res.message);
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+}

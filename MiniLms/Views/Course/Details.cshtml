@@ -2,6 +2,8 @@
 
 @{
     ViewData["Title"] = Model.Title + " - Ders Detayları";
+    var savedSummaries = ViewBag.SavedSummaries as List<MiniLms.Models.DocumentSummary> ?? new List<MiniLms.Models.DocumentSummary>();
+    var enrolledStudents = ViewBag.EnrolledStudentSummaries as List<MiniLms.ViewModels.EnrolledStudentSummaryDto> ?? new List<MiniLms.ViewModels.EnrolledStudentSummaryDto>();
 }
 
 <div>
@@ -20,7 +22,7 @@
         </div>
     }
 
-    <section class="page-hero">
+    <section class="page-hero d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div class="d-flex align-items-center gap-3">
             <span class="hero-icon"><i class="bi bi-journal-richtext"></i></span>
             <div>
@@ -28,7 +30,15 @@
                 <p class="page-subtitle">@Model.Description</p>
             </div>
         </div>
-        <span class="badge bg-light text-primary border">@Model.CourseCode</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-light text-primary border fs-6 px-3 py-2">@Model.CourseCode</span>
+            @if (User.IsInRole("Teacher"))
+            {
+                <button type="button" class="btn btn-info text-white fw-bold shadow-sm" id="btnStudentSummariesModalTrigger">
+                    <i class="bi bi-people-fill"></i> Öğrenci Özetleri
+                </button>
+            }
+        </div>
     </section>
 
     <div class="row">
@@ -93,7 +103,17 @@
                     </p>
 
                     <div id="aiResponseContainer" class="p-3 mb-3 border border-2 rounded bg-light d-none">
-                        <span class="fw-bold text-primary d-block mb-2 border-bottom pb-2"><i class="bi bi-chat-square-text"></i> Asistanın Cevabı / Özet:</span>
+                        <div class="d-flex justify-content-between align-items-center mb-2 border-bottom pb-2">
+                            <span class="fw-bold text-primary small">
+                                <i class="bi bi-chat-square-text"></i> <span id="aiResponseTitle">Asistanın Cevabı / Özet</span>
+                                <span id="summaryBadge" class="badge bg-success ms-1 d-none"></span>
+                            </span>
+                            <div id="summaryActions" class="d-none d-flex gap-1">
+                                <button type="button" class="btn btn-xs btn-outline-warning btn-sm" id="btnEditSummary" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i> Düzenle</button>
+                                <button type="button" class="btn btn-xs btn-outline-info btn-sm" id="btnRefreshSummary" title="Yeniden AI Özeti Üret"><i class="bi bi-arrow-clockwise"></i> Yeniden Üret</button>
+                                <button type="button" class="btn btn-xs btn-outline-danger btn-sm" id="btnDeleteSummary" title="Özeti Sil"><i class="bi bi-trash"></i> Sil</button>
+                            </div>
+                        </div>
                         <div id="aiResponseText" class="text-dark" style="max-height: 400px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin;"></div>
                     </div>
 
@@ -123,8 +143,9 @@
             </div>
 
             <div class="card mb-4">
-                <div class="card-header bg-white py-3">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-file-earmark-text text-primary"></i> Ek Ders Dokümanları</h5>
+                    <span class="badge bg-light text-secondary border">@Model.Documents?.Count() Doküman</span>
                 </div>
                 <div class="card-body p-0">
                     @if (Model.Documents != null && Model.Documents.Any())
@@ -132,14 +153,30 @@
                         <div class="list-group list-group-flush">
                             @foreach (var doc in Model.Documents)
                             {
+                                var existingSummary = savedSummaries.FirstOrDefault(s => s.CourseDocumentId == doc.Id);
                                 <div class="list-group-item d-flex justify-content-between align-items-center p-3">
-                                    <div class="text-truncate me-2" style="max-width: 60%;">
-                                        <span class="fw-bold text-dark small d-block text-truncate">@doc.FileName</span>
+                                    <div class="text-truncate me-2" style="max-width: 55%;">
+                                        <div class="d-flex align-items-center gap-1">
+                                            <span class="fw-bold text-dark small d-block text-truncate">@doc.FileName</span>
+                                            @if (existingSummary != null)
+                                            {
+                                                <span class="badge bg-success-subtle text-success border border-success" style="font-size: 10px;" title="Kayıtlı Özet Mevcut">Özet Kayıtlı</span>
+                                            }
+                                        </div>
                                         <small class="text-muted" style="font-size: 11px;">⏱️ @doc.UploadedDate.ToString("dd.MM.yyyy HH:mm")</small>
                                     </div>
                                     <div class="d-flex gap-1">
                                         <a href="@doc.FilePath" target="_blank" class="btn btn-xs btn-outline-primary btn-sm" title="Aç"><i class="bi bi-box-arrow-up-right"></i></a>
-                                        <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-success btn-sm btn-summary">Özetle</button>
+                                        
+                                        @if (existingSummary != null)
+                                        {
+                                            <button type="button" data-id="@doc.Id" class="btn btn-xs btn-success btn-sm btn-summary" title="Kayıtlı Özeti Aç"><i class="bi bi-book"></i> Özeti Oku</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-success btn-sm btn-summary" title="Yapay Zeka ile Özet Çıkar"><i class="bi bi-magic"></i> Özetle</button>
+                                        }
+
                                         <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-primary btn-sm btn-quiz">Quiz</button>
 
                                         @if (User.IsInRole("Teacher"))
@@ -161,6 +198,47 @@
                     }
                 </div>
             </div>
+
+            @if (User.IsInRole("Student"))
+            {
+                <!-- 📌 ÖĞRENCİ PANELİ: KİŞİSEL DERS ÖZETLERİ -->
+                <div class="card mb-4 border-primary shadow-sm">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-3">
+                        <h5 class="mb-0 fw-bold text-white"><i class="bi bi-journal-bookmark-fill"></i> Kaydedilmiş Ders Özetlerim</h5>
+                        <span class="badge bg-light text-primary fw-bold">@savedSummaries.Count Özet Kayıtlı</span>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (savedSummaries.Any())
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var summary in savedSummaries)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-center p-3" id="summary-row-@summary.Id">
+                                        <div class="text-truncate me-2" style="max-width: 55%;">
+                                            <div class="d-flex align-items-center gap-1 mb-1">
+                                                <span class="badge bg-primary fw-bold" style="font-size: 10px;">ID: #@summary.Id</span>
+                                                <span class="fw-bold text-dark small text-truncate">@(summary.CourseDocument?.FileName ?? "Ders Dokümanı")</span>
+                                            </div>
+                                            <small class="text-muted d-block" style="font-size: 11px;">
+                                                ⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+                                            </small>
+                                        </div>
+                                        <div class="d-flex gap-1">
+                                            <button type="button" class="btn btn-xs btn-primary btn-sm btn-read-summary-list" data-id="@summary.Id" data-docid="@summary.CourseDocumentId" title="Özeti Gör"><i class="bi bi-eye"></i> Oku</button>
+                                            <button type="button" class="btn btn-xs btn-outline-warning btn-sm btn-edit-summary-list" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
+                                            <button type="button" class="btn btn-xs btn-outline-danger btn-sm btn-delete-summary-list" data-id="@summary.Id" title="Özeti Sil"><i class="bi bi-trash"></i></button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="text-muted text-center py-4 mb-0 small">Henüz bu ders için çıkarılmış kişisel özetiniz bulunmuyor. Doküman listesinden <strong>"Özetle"</strong> butonuna basarak ilk özetinizi oluşturabilirsiniz.</p>
+                        }
+                    </div>
+                </div>
+            }
 
             @if (User.IsInRole("Teacher"))
             {
@@ -250,6 +328,105 @@
     </div>
 </div>
 
+<!-- 🎯 ÖZET DÜZENLEME MODALI -->
+<div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="editSummaryModalTitle"><i class="bi bi-pencil-square"></i> Özet Düzenle (ID: #<span id="editSummaryIdText"></span>)</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editSummaryId" />
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-secondary">Özet İçeriği</label>
+                    <textarea class="form-control font-monospace" id="editSummaryContent" rows="12" style="font-size: 13px; line-height: 1.5;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnSaveEditedSummary"><i class="bi bi-check-circle"></i> Kaydet</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 🎯 ÖĞRETMEN PANELİ: ÖĞRENCİ ÖZETLERİ MODALI (ADIM 1: ÖĞRENCİ LİSTESİ, ADIM 2: ÖZETLER) -->
+<div class="modal fade" id="studentSummariesListModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white py-3">
+                <h5 class="modal-title fw-bold text-white d-flex align-items-center gap-2">
+                    <i class="bi bi-people-fill"></i> <span id="studentSummariesModalHeaderTitle">Derse Kayıtlı Öğrenciler ve Özetleri</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- ADIM 1: ÖĞRENCİ LİSTESİ GÖRÜNÜMÜ -->
+                <div id="studentListViewSection">
+                    @if (enrolledStudents.Any())
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var student in enrolledStudents)
+                            {
+                                <div class="list-group-item d-flex justify-content-between align-items-center p-3 student-list-item" style="cursor: pointer;" data-studentid="@student.StudentId" data-studentname="@student.StudentName">
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                            <span class="fw-bold text-dark"><i class="bi bi-person-circle text-primary"></i> @student.StudentName</span>
+                                            <span class="badge bg-secondary" style="font-size: 11px;">No: @student.StudentNumber</span>
+                                            @if (student.Summaries.Any())
+                                            {
+                                                <span class="badge bg-success" style="font-size: 11px;">@student.Summaries.Count Özet Mevcut</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-light text-muted border" style="font-size: 11px;">Özet Yok</span>
+                                            }
+                                        </div>
+                                        <small class="text-muted" style="font-size: 11px;">✉️ @student.Email</small>
+                                    </div>
+                                    <div>
+                                        @if (student.Summaries.Any())
+                                        {
+                                            <button type="button" class="btn btn-xs btn-primary btn-sm btn-select-student" data-studentid="@student.StudentId" data-studentname="@student.StudentName">
+                                                <i class="bi bi-file-earmark-pdf-fill"></i> Özetlerini Gör (@student.Summaries.Count) <i class="bi bi-chevron-right"></i>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">Özet Çıkarılmadı</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted text-center py-5 mb-0">Bu derse henüz kayıtlı öğrenci bulunmamaktadır.</p>
+                    }
+                </div>
+
+                <!-- ADIM 2: SEÇİLEN ÖĞRENCİNİN ÖZETLERİ GÖRÜNÜMÜ -->
+                <div id="studentDetailSummaryViewSection" class="p-3 d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary fw-bold" id="btnBackToStudentList">
+                            <i class="bi bi-arrow-left"></i> Öğrenci Listesine Dön
+                        </button>
+                        <h6 class="fw-bold text-primary mb-0" id="selectedStudentTitle"></h6>
+                    </div>
+                    <div id="selectedStudentSummariesContent">
+                        <span class="text-muted">Özetler yükleniyor...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
@@ -294,33 +471,298 @@
         });
         });
 
-        // 🎯 2. Tek Tıkla Doküman Özetleme AJAX Akışı
+        var activeSummaryState = {
+            summaryId: null,
+            documentId: null,
+            rawText: ""
+        };
+        var editSummaryModal = new bootstrap.Modal(document.getElementById("editSummaryModal"));
+
+        function loadDocumentSummary(docId, forceRefresh) {
+            var courseId = '@Model.Id';
+            var container = $("#aiResponseContainer");
+            var txt = $("#aiResponseText");
+
+            container.removeClass("d-none");
+            $('html, body').animate({ scrollTop: container.offset().top - 100 }, 400);
+
+            if (forceRefresh) {
+                txt.html("<span class='text-muted italic'>Yapay zeka dokümanı yeniden analiz edip güncel özet çıkarıyor...</span>");
+            } else {
+                txt.html("<span class='text-muted italic'>Doküman özeti veritabanından yükleniyor...</span>");
+            }
+
+            $.ajax({
+                url: '@Url.Action("DocumentSummary", "Course")',
+                type: 'GET',
+                data: { courseId: courseId, documentId: docId, forceRefresh: forceRefresh },
+                success: function (data) {
+                    if (data.success) {
+                        activeSummaryState.summaryId = data.summaryId;
+                        activeSummaryState.documentId = data.documentId;
+                        activeSummaryState.rawText = data.response;
+
+                        txt.html(formatAiResponseToHtml(data.response));
+
+                        if (data.summaryId) {
+                            $("#summaryIdBadge").text(data.summaryId);
+                            $("#summaryBadge").removeClass("d-none");
+                            $("#summaryActions").removeClass("d-none");
+
+                            if (data.isCached) {
+                                $("#summaryBadge").text("Kayıtlı Özet Yüklendi (ID: #" + data.summaryId + ")");
+                            } else {
+                                $("#summaryBadge").text("Yeni Özet Kaydedildi (ID: #" + data.summaryId + ")");
+                            }
+                        }
+                    } else {
+                        txt.html("<span class='text-danger fw-bold'>⚠️ " + data.response + "</span>");
+                        $("#summaryActions").addClass("d-none");
+                        $("#summaryBadge").addClass("d-none");
+                    }
+                },
+                error: function () {
+                    txt.html("<span class='text-danger'>Özet yüklenirken teknik bir hata meydana geldi.</span>");
+                }
+            });
+        }
+
+        // 🎯 2. Tek Tıkla Doküman Özetleme (ID ile Geri Çekme & Önbellek)
         $(".btn-summary").click(function () {
-        var docId = $(this).data("id");
-        var courseId = '@Model.Id';
-        var container = $("#aiResponseContainer");
-        var txt = $("#aiResponseText");
-
-        container.removeClass("d-none");
-        // Ekranı akıcı şekilde asistan paneline kaydırır
-        $('html, body').animate({ scrollTop: container.offset().top - 100 }, 400);
-        txt.html("<span class='text-muted italic'>Doküman sayfaları taranıyor ve yapay zeka tarafından özet çıkartılıyor...</span>");
-
-        $.ajax({
-        url: '@Url.Action("DocumentSummary", "Course")',
-        type: 'GET',
-        data: { courseId: courseId, documentId: docId },
-        success: function (data) {
-        if (data.success) {
-        txt.html(formatAiResponseToHtml(data.response));
-        } else {
-        txt.html("<span class='text-danger fw-bold'>⚠️ " + data.response + "</span>");
-        }
-        },
-        error: function () {
-        txt.html("<span class='text-danger'>Özet çıkarılırken teknik bir iletişim hatası meydana geldi.</span>");
-        }
+            var docId = $(this).data("id");
+            loadDocumentSummary(docId, false);
         });
+
+        // 🎯 Yeniden AI Özeti Üret (Force Refresh)
+        $("#btnRefreshSummary").click(function () {
+            if (activeSummaryState.documentId) {
+                if (confirm("Bu dokümanın özetini yapay zekaya yeniden ürettirmek istediğinizden emin misiniz?")) {
+                    loadDocumentSummary(activeSummaryState.documentId, true);
+                }
+            }
+        });
+
+        // 🎯 Özeti Düzenle Modalını Aç
+        $("#btnEditSummary").click(function () {
+            if (!activeSummaryState.summaryId) return;
+            $("#editSummaryId").val(activeSummaryState.summaryId);
+            $("#editSummaryIdText").text(activeSummaryState.summaryId);
+            $("#editSummaryContent").val(activeSummaryState.rawText);
+            editSummaryModal.show();
+        });
+
+        // 🎯 Düzenlenen Özeti Kaydet (Öğrenci veya Öğretmen)
+        $("#btnSaveEditedSummary").click(function () {
+            var summaryId = $("#editSummaryId").val();
+            var updatedText = $("#editSummaryContent").val();
+
+            if (!updatedText.trim()) {
+                alert("Özet metni boş olamaz.");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("UpdateSummary", "Course")',
+                type: 'POST',
+                data: { summaryId: summaryId, summaryText: updatedText },
+                success: function (res) {
+                    if (res.success) {
+                        activeSummaryState.rawText = updatedText;
+                        $("#aiResponseText").html(formatAiResponseToHtml(updatedText));
+                        editSummaryModal.hide();
+                        alert("Özet (ID #" + summaryId + ") veritabanında başarıyla güncellendi.");
+                    } else {
+                        alert("Hata: " + res.message);
+                    }
+                },
+                error: function () {
+                    alert("Özet güncellenirken sunucu hatası oluştu.");
+                }
+            });
+        });
+
+        // 🎯 Özeti Sil (Veritabanından Kaldır)
+        $("#btnDeleteSummary").click(function () {
+            if (!activeSummaryState.summaryId) return;
+
+            if (confirm("ID #" + activeSummaryState.summaryId + " numaralı özeti veritabanından silmek istediğinize emin misiniz?")) {
+                $.ajax({
+                    url: '@Url.Action("DeleteSummary", "Course")',
+                    type: 'POST',
+                    data: { summaryId: activeSummaryState.summaryId },
+                    success: function (res) {
+                        if (res.success) {
+                            alert(res.message);
+                            $("#summary-row-" + activeSummaryState.summaryId).fadeOut(300, function () { $(this).remove(); });
+                            $("#aiResponseContainer").addClass("d-none");
+                            activeSummaryState.summaryId = null;
+                            activeSummaryState.documentId = null;
+                        } else {
+                            alert("Hata: " + res.message);
+                        }
+                    },
+                    error: function () {
+                        alert("Özet silinirken sunucu hatası oluştu.");
+                    }
+                });
+            }
+        });
+
+        function loadSummaryById(summaryId) {
+            var container = $("#aiResponseContainer");
+            var txt = $("#aiResponseText");
+
+            container.removeClass("d-none");
+            $('html, body').animate({ scrollTop: container.offset().top - 100 }, 400);
+            txt.html("<span class='text-muted italic'>Özet ID #" + summaryId + " veritabanından çekiliyor...</span>");
+
+            $.ajax({
+                url: '@Url.Action("GetSummaryById", "Course")',
+                type: 'GET',
+                data: { summaryId: summaryId },
+                success: function (data) {
+                    if (data.success) {
+                        activeSummaryState.summaryId = data.summaryId;
+                        activeSummaryState.documentId = data.documentId;
+                        activeSummaryState.rawText = data.summaryText;
+
+                        txt.html(formatAiResponseToHtml(data.summaryText));
+                        $("#summaryIdBadge").text(data.summaryId);
+                        $("#summaryBadge").text("Kayıtlı Özet Yüklendi (ID: #" + data.summaryId + ")").removeClass("d-none");
+                        $("#summaryActions").removeClass("d-none");
+                    } else {
+                        txt.html("<span class='text-danger fw-bold'>⚠️ " + data.message + "</span>");
+                    }
+                },
+                error: function () {
+                    txt.html("<span class='text-danger'>Özet yüklenirken hata oluştu.</span>");
+                }
+            });
+        }
+
+        // 🎯 Kaydedilmiş Özetler Listesinden "Oku" Butonu
+        $(document).on("click", ".btn-read-summary-list", function () {
+            var summaryId = $(this).data("id");
+            loadSummaryById(summaryId);
+        });
+
+        // 🎯 Kaydedilmiş Özetler Listesinden "Düzenle" Butonu
+        $(document).on("click", ".btn-edit-summary-list", function () {
+            var summaryId = $(this).data("id");
+            $.ajax({
+                url: '@Url.Action("GetSummaryById", "Course")',
+                type: 'GET',
+                data: { summaryId: summaryId },
+                success: function (data) {
+                    if (data.success) {
+                        activeSummaryState.summaryId = data.summaryId;
+                        activeSummaryState.documentId = data.documentId;
+                        activeSummaryState.rawText = data.summaryText;
+
+                        $("#editSummaryId").val(data.summaryId);
+                        $("#editSummaryIdText").text(data.summaryId);
+                        $("#editSummaryContent").val(data.summaryText);
+                        editSummaryModal.show();
+                    } else {
+                        alert(data.message);
+                    }
+                }
+            });
+        });
+
+        // 🎯 Kaydedilmiş Özetler Listesinden "Sil" Butonu
+        $(document).on("click", ".btn-delete-summary-list", function () {
+            var summaryId = $(this).data("id");
+            if (confirm("ID #" + summaryId + " numaralı özeti veritabanından silmek istediğinize emin misiniz?")) {
+                $.ajax({
+                    url: '@Url.Action("DeleteSummary", "Course")',
+                    type: 'POST',
+                    data: { summaryId: summaryId },
+                    success: function (res) {
+                        if (res.success) {
+                            $("#summary-row-" + summaryId).fadeOut(300, function () { $(this).remove(); });
+                            if (activeSummaryState.summaryId == summaryId) {
+                                $("#aiResponseContainer").addClass("d-none");
+                                activeSummaryState.summaryId = null;
+                            }
+                            alert("Özet silindi.");
+                        } else {
+                            alert("Hata: " + res.message);
+                        }
+                    }
+                });
+            }
+        });
+
+        var studentSummariesListModal = new bootstrap.Modal(document.getElementById("studentSummariesListModal"));
+
+        // 🎯 "Öğrenci Özetleri" Butonuna Basıldığında Öğrenci Listesi Modalını Aç
+        $("#btnStudentSummariesModalTrigger").click(function () {
+            $("#studentListViewSection").removeClass("d-none");
+            $("#studentDetailSummaryViewSection").addClass("d-none");
+            studentSummariesListModal.show();
+        });
+
+        function loadStudentSummariesIntoModal(studentId, studentName) {
+            var courseId = '@Model.Id';
+
+            $("#studentListViewSection").addClass("d-none");
+            $("#studentDetailSummaryViewSection").removeClass("d-none");
+            $("#selectedStudentTitle").html("<i class='bi bi-person-circle'></i> " + studentName + " - Ders PDF Özetleri");
+            $("#selectedStudentSummariesContent").html("<div class='p-4 text-center text-muted'><span class='spinner-border spinner-border-sm me-2'></span>Öğrenciye ait özetler yükleniyor...</div>");
+
+            $.ajax({
+                url: '@Url.Action("GetStudentSummariesByCourse", "Course")',
+                type: 'GET',
+                data: { courseId: courseId, studentId: studentId },
+                success: function (res) {
+                    if (res.success && res.summaries && res.summaries.length > 0) {
+                        var html = "<div class='list-group list-group-flush'>";
+                        $.each(res.summaries, function (idx, s) {
+                            html += "<div class='list-group-item p-3 border rounded mb-2 bg-light'>";
+                            html += "  <div class='d-flex justify-content-between align-items-center mb-2'>";
+                            html += "    <div>";
+                            html += "      <span class='badge bg-primary me-1'>ID: #" + s.summaryId + "</span>";
+                            html += "      <strong class='text-dark small'><i class='bi bi-file-earmark-pdf text-danger'></i> " + s.documentName + "</strong>";
+                            html += "    </div>";
+                            html += "    <small class='text-muted'>⏱️ " + s.createdAt + "</small>";
+                            html += "  </div>";
+                            html += "  <div class='bg-white p-2 rounded border small text-secondary mb-2' style='max-height: 80px; overflow: hidden;'>" + s.summaryText.substring(0, 150) + "...</div>";
+                            html += "  <div class='d-flex gap-1 justify-content-end'>";
+                            if (s.documentPath) {
+                                html += "    <a href='" + s.documentPath + "' target='_blank' class='btn btn-xs btn-outline-primary btn-sm'><i class='bi bi-box-arrow-up-right'></i> PDF Aç</a>";
+                            }
+                            html += "    <button type='button' class='btn btn-xs btn-primary btn-sm btn-read-summary-list' data-id='" + s.summaryId + "' onclick='studentSummariesListModal.hide();'><i class='bi bi-eye'></i> Tamamını Oku</button>";
+                            html += "    <button type='button' class='btn btn-xs btn-outline-warning btn-sm btn-edit-summary-list' data-id='" + s.summaryId + "' onclick='studentSummariesListModal.hide();'><i class='bi bi-pencil-square'></i> Düzenle</button>";
+                            html += "    <button type='button' class='btn btn-xs btn-outline-danger btn-sm btn-delete-summary-list' data-id='" + s.summaryId + "' onclick='studentSummariesListModal.hide();'><i class='bi bi-trash'></i> Sil</button>";
+                            html += "  </div>";
+                            html += "</div>";
+                        });
+                        html += "</div>";
+                        $("#selectedStudentSummariesContent").html(html);
+                    } else {
+                        $("#selectedStudentSummariesContent").html("<div class='alert alert-warning mb-0'>Bu öğrenci henüz bu ders için herhangi bir dokümanın özetini çıkarmamış.</div>");
+                    }
+                },
+                error: function () {
+                    $("#selectedStudentSummariesContent").html("<div class='alert alert-danger mb-0'>Öğrenci özetleri yüklenirken teknik bir hata oluştu.</div>");
+                }
+            });
+        }
+
+        // 🎯 Öğrenciye Tıklandığında veya Özetlerini Gör Butonuna Basıldığında
+        $(document).on("click", ".student-list-item, .btn-select-student, .btn-view-student-pdf", function (e) {
+            e.stopPropagation();
+            var studentId = $(this).data("studentid");
+            var studentName = $(this).data("studentname");
+            loadStudentSummariesIntoModal(studentId, studentName);
+            studentSummariesListModal.show();
+        });
+
+        // 🎯 Öğrenci Listesine Dön Butonu
+        $("#btnBackToStudentList").click(function () {
+            $("#studentDetailSummaryViewSection").addClass("d-none");
+            $("#studentListViewSection").removeClass("d-none");
         });
 
         // 🎯 3. Dokümandan Etkileşimli Quiz Üretme Akışı

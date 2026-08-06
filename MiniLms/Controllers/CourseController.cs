@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using MiniLms.Interfaces;
 using MiniLms.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -19,17 +20,23 @@ namespace MiniLms.Controllers
         private readonly IAiService _aiService;
         private readonly IVectorDbService _vectorDbService;
         private readonly ICourseDocumentService _courseDocumentService;
+        private readonly MiniLms.Data.ApplicationDbContext _dbContext;
+        private readonly Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> _userManager;
 
         public CourseController(
             ICourseService courseService,
             IAiService aiService,
             IVectorDbService vectorDbService,
-            ICourseDocumentService courseDocumentService)
+            ICourseDocumentService courseDocumentService,
+            MiniLms.Data.ApplicationDbContext dbContext,
+            Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> userManager)
         {
             _courseService = courseService;
             _aiService = aiService;
             _vectorDbService = vectorDbService;
             _courseDocumentService = courseDocumentService;
+            _dbContext = dbContext;
+            _userManager = userManager;
         }
 
         // Tüm kursları ana sayfada listeler
@@ -37,6 +44,95 @@ namespace MiniLms.Controllers
         {
             var courses = await _courseService.GetAllCoursesAsync();
             return View(courses);
+        }
+
+        // GET: Course/Create (Sadece Öğretmenler yeni ders açabilir)
+        [HttpGet]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        // POST: Course/Create
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(MiniLms.Models.Course course)
+        {
+            if (ModelState.IsValid)
+            {
+                await _courseService.AddCourseAsync(course);
+                TempData["SuccessMessage"] = $"'{course.Title}' dersi başarıyla oluşturuldu.";
+                return RedirectToAction(nameof(Index));
+            }
+            return View(course);
+        }
+
+        // GET: Course/Edit/5 (Sadece Öğretmenler ders düzenleyebilir)
+        [HttpGet]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        public async Task<IActionResult> Edit(int id)
+        {
+            var course = await _courseService.GetCourseByIdAsync(id);
+            if (course == null)
+            {
+                return NotFound();
+            }
+            return View(course);
+        }
+
+        // POST: Course/Edit/5
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(int id, MiniLms.Models.Course course)
+        {
+            if (id != course.Id)
+            {
+                return BadRequest();
+            }
+
+            if (ModelState.IsValid)
+            {
+                await _courseService.UpdateCourseAsync(course);
+                TempData["SuccessMessage"] = $"'{course.Title}' ders bilgileri güncellendi.";
+                return RedirectToAction(nameof(Index));
+            }
+            return View(course);
+        }
+
+        // GET: Course/Delete/5 (Sadece Öğretmenler ders silebilir)
+        [HttpGet]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var course = await _courseService.GetCourseByIdAsync(id);
+            if (course == null)
+            {
+                return NotFound();
+            }
+            return View(course);
+        }
+
+        // POST: Course/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteConfirmed(int id)
+        {
+            try
+            {
+                await _courseService.DeleteCourseAsync(id);
+                TempData["SuccessMessage"] = "Ders sistemden silindi.";
+                return RedirectToAction(nameof(Index));
+            }
+            catch (Exception ex)
+            {
+                ViewBag.ErrorMessage = $"Ders silinirken hata oluştu: {ex.Message}";
+                var course = await _courseService.GetCourseByIdAsync(id);
+                return View(course);
+            }
         }
 
         // Kursun detaylarını ve haftalık konularını (Lesson) getirir
@@ -48,11 +144,56 @@ namespace MiniLms.Controllers
                 return NotFound();
             }
 
-            await _courseDocumentService.EnsureDocumentTopicLessonsAsync(id);
-            course = await _courseService.GetCourseByIdAsync(id);
-            if (course == null)
+            var currentUserId = _userManager.GetUserId(User);
+            var isTeacher = User.IsInRole("Teacher");
+
+            if (isTeacher)
             {
-                return NotFound();
+                // 🎯 ÖĞRETMEN TARAFINDA: Derse kayıtlı öğrencileri ve her öğrencinin bu derse ait özetlerini getir
+                var enrollments = await _dbContext.Enrollments
+                    .Include(e => e.Student)
+                    .Where(e => e.CourseId == id)
+                    .ToListAsync();
+
+                var studentSummariesList = new List<MiniLms.ViewModels.EnrolledStudentSummaryDto>();
+                foreach (var enrollment in enrollments)
+                {
+                    var user = await _userManager.FindByEmailAsync(enrollment.Student.Email);
+                    var userSummaries = new List<MiniLms.Models.DocumentSummary>();
+                    if (user != null)
+                    {
+                        userSummaries = await _dbContext.DocumentSummaries
+                            .Include(ds => ds.CourseDocument)
+                            .Where(ds => ds.CourseId == id && ds.UserId == user.Id)
+                            .OrderByDescending(ds => ds.CreatedAt)
+                            .ToListAsync();
+                    }
+
+                    studentSummariesList.Add(new MiniLms.ViewModels.EnrolledStudentSummaryDto
+                    {
+                        StudentId = enrollment.Student.Id,
+                        UserId = user?.Id,
+                        StudentName = $"{enrollment.Student.FirstName} {enrollment.Student.LastName}".Trim(),
+                        StudentNumber = enrollment.Student.StudentNumber,
+                        Email = enrollment.Student.Email,
+                        Summaries = userSummaries
+                    });
+                }
+
+                ViewBag.EnrolledStudentSummaries = studentSummariesList;
+                ViewBag.SavedSummaries = new List<MiniLms.Models.DocumentSummary>();
+            }
+            else
+            {
+                // 🎯 ÖĞRENCİ TARAFINDA: Sadece öğrencinin kendi oluşturduğu özetleri getir
+                var savedSummaries = await _dbContext.DocumentSummaries
+                    .Include(s => s.CourseDocument)
+                    .Include(s => s.User)
+                    .Where(s => s.CourseId == id && s.UserId == currentUserId)
+                    .OrderByDescending(s => s.CreatedAt)
+                    .ToListAsync();
+
+                ViewBag.SavedSummaries = savedSummaries;
             }
 
             return View(course);
@@ -205,7 +346,7 @@ namespace MiniLms.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> DocumentSummary(int courseId, int documentId)
+        public async Task<IActionResult> DocumentSummary(int courseId, int documentId, bool forceRefresh = false)
         {
             try
             {
@@ -215,6 +356,33 @@ namespace MiniLms.Controllers
                     return Json(new { success = false, response = "Seçilen doküman bu derse ait değil veya bulunamadı." });
                 }
 
+                var currentUserId = _userManager.GetUserId(User);
+
+                // 🎯 1. Eğer zorunlu yenileme istenmediyse, GİRİŞ YAPAN KULLANICININ bu dokümana ait kişisel özetini getir
+                if (!forceRefresh)
+                {
+                    var existingSummary = await _dbContext.DocumentSummaries
+                        .Include(s => s.User)
+                        .Where(s => s.CourseDocumentId == documentId && s.UserId == currentUserId)
+                        .OrderByDescending(s => s.CreatedAt)
+                        .FirstOrDefaultAsync();
+
+                    if (existingSummary != null)
+                    {
+                        return Json(new { 
+                            success = true, 
+                            summaryId = existingSummary.Id, 
+                            documentId = documentId,
+                            documentName = document.FileName,
+                            response = existingSummary.SummaryText, 
+                            isCached = true,
+                            authorName = existingSummary.User != null ? $"{existingSummary.User.FirstName} {existingSummary.User.LastName}".Trim() : "Sistem",
+                            createdAt = existingSummary.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+                        });
+                    }
+                }
+
+                // 🎯 2. Kayıtlı kişisel özet yoksa veya forceRefresh=true ise yeni özet üret
                 var documentTexts = await _courseDocumentService.GetDocumentTextChunksAsync(documentId, maxChunks: 4);
                 if (documentTexts.Count == 0)
                 {
@@ -247,11 +415,183 @@ namespace MiniLms.Controllers
                     summary = BuildLocalDocumentSummary(document.FileName, documentTexts);
                 }
 
-                return Json(new { success = true, response = summary });
+                // 🎯 3. Üretilen özeti giriş yapan öğrencinin ID'si ile kaydet (Varsa mevcut kişisel kaydı güncelle, yoksa ekle)
+                var docSummaryRecord = await _dbContext.DocumentSummaries
+                    .FirstOrDefaultAsync(s => s.CourseDocumentId == documentId && s.UserId == currentUserId);
+
+                if (docSummaryRecord != null)
+                {
+                    docSummaryRecord.UserId = currentUserId;
+                    docSummaryRecord.SummaryText = summary;
+                    docSummaryRecord.CreatedAt = DateTime.Now;
+                    _dbContext.DocumentSummaries.Update(docSummaryRecord);
+                }
+                else
+                {
+                    docSummaryRecord = new MiniLms.Models.DocumentSummary
+                    {
+                        UserId = currentUserId,
+                        CourseId = courseId,
+                        CourseDocumentId = documentId,
+                        SummaryText = summary,
+                        CreatedAt = DateTime.Now
+                    };
+                    _dbContext.DocumentSummaries.Add(docSummaryRecord);
+                }
+
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { 
+                    success = true, 
+                    summaryId = docSummaryRecord.Id, 
+                    documentId = documentId,
+                    documentName = document.FileName,
+                    response = summary, 
+                    isCached = false,
+                    createdAt = docSummaryRecord.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+                });
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, response = $"Doküman özeti alınırken teknik bir hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 ÖĞRETMENİN ÖĞRENCİ BAZLI PDF ÖZETLERİNİ GÖRÜNTÜLEMESİ
+        [HttpGet]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        public async Task<IActionResult> GetStudentSummariesByCourse(int courseId, int studentId)
+        {
+            var student = await _dbContext.Students.FindAsync(studentId);
+            if (student == null)
+            {
+                return Json(new { success = false, message = "Öğrenci bulunamadı." });
+            }
+
+            var user = await _userManager.FindByEmailAsync(student.Email);
+            if (user == null)
+            {
+                return Json(new { success = false, message = "Öğrenciye ait sistem kullanıcısı bulunamadı." });
+            }
+
+            var summaries = await _dbContext.DocumentSummaries
+                .Include(s => s.CourseDocument)
+                .Where(s => s.CourseId == courseId && s.UserId == user.Id)
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => new
+                {
+                    summaryId = s.Id,
+                    documentName = s.CourseDocument != null ? s.CourseDocument.FileName : "Doküman",
+                    documentPath = s.CourseDocument != null ? s.CourseDocument.FilePath : "",
+                    summaryText = s.SummaryText,
+                    createdAt = s.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+                })
+                .ToListAsync();
+
+            return Json(new
+            {
+                success = true,
+                studentName = $"{student.FirstName} {student.LastName}".Trim(),
+                studentNumber = student.StudentNumber,
+                summaries = summaries
+            });
+        }
+
+        // 🎯 SADECE ÖĞRENCİLERE ÖZEL KİŞİSEL ÖZETLER SAYFASI (Sekme)
+        [HttpGet]
+        [Authorize(Policy = UserPolicies.StudentOnly)]
+        public async Task<IActionResult> MySummaries()
+        {
+            var userId = _userManager.GetUserId(User);
+
+            var summaries = await _dbContext.DocumentSummaries
+                .Include(s => s.Course)
+                .Include(s => s.CourseDocument)
+                .Include(s => s.User)
+                .Where(s => s.UserId == userId)
+                .OrderByDescending(s => s.CreatedAt)
+                .ToListAsync();
+
+            return View(summaries);
+        }
+
+        // 🎯 Özet ID ile tekil özet metnini getirme
+        [HttpGet]
+        public async Task<IActionResult> GetSummaryById(int summaryId)
+        {
+            var summary = await _dbContext.DocumentSummaries
+                .Include(s => s.CourseDocument)
+                .Include(s => s.User)
+                .FirstOrDefaultAsync(s => s.Id == summaryId);
+
+            if (summary == null)
+            {
+                return Json(new { success = false, message = "Özet bulunamadı." });
+            }
+
+            return Json(new
+            {
+                success = true,
+                summaryId = summary.Id,
+                documentId = summary.CourseDocumentId,
+                documentName = summary.CourseDocument?.FileName ?? "Doküman",
+                summaryText = summary.SummaryText,
+                authorName = summary.User != null ? $"{summary.User.FirstName} {summary.User.LastName}".Trim() : "Sistem",
+                createdAt = summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+            });
+        }
+
+        // 🎯 Öğrenci ve Öğretmenlerin Özeti Düzenlemesi (Edit)
+        [HttpPost]
+        public async Task<IActionResult> UpdateSummary(int summaryId, string summaryText)
+        {
+            try
+            {
+                var summary = await _dbContext.DocumentSummaries.FindAsync(summaryId);
+                if (summary == null)
+                {
+                    return Json(new { success = false, message = "Güncellenecek özet bulunamadı." });
+                }
+
+                if (string.IsNullOrWhiteSpace(summaryText))
+                {
+                    return Json(new { success = false, message = "Özet metni boş olamaz." });
+                }
+
+                summary.SummaryText = summaryText;
+                summary.CreatedAt = DateTime.Now;
+
+                _dbContext.DocumentSummaries.Update(summary);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, summaryId = summary.Id, message = "Özet başarıyla güncellendi.", response = summaryText });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Özet güncellenirken hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 Özet Silme (Delete)
+        [HttpPost]
+        public async Task<IActionResult> DeleteSummary(int summaryId)
+        {
+            try
+            {
+                var summary = await _dbContext.DocumentSummaries.FindAsync(summaryId);
+                if (summary == null)
+                {
+                    return Json(new { success = false, message = "Silinecek özet bulunamadı." });
+                }
+
+                _dbContext.DocumentSummaries.Remove(summary);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, message = "Özet başarıyla silindi." });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Özet silinirken hata oluştu: {ex.Message}" });
             }
         }
 

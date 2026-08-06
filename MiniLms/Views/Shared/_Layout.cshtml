@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 @using Microsoft.AspNetCore.Identity
 @using MiniLms.Models
 @inject SignInManager<ApplicationUser> SignInManager
@@ -52,6 +52,11 @@
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-controller="StudentCourses" asp-action="Index">
                                     <i class="bi bi-journal-check"></i> Derslerim
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-area="" asp-controller="Course" asp-action="MySummaries">
+                                    <i class="bi bi-bookmark-star-fill text-warning"></i> Özel Özetlerim
                                 </a>
                             </li>
                         }
