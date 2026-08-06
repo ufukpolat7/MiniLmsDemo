@@ -79,6 +79,7 @@ builder.Services.AddScoped<ILessonContentRepository, LessonContentRepository>();
 
 builder.Services.AddHttpClient<IAiService, AiService>();
 builder.Services.AddHttpClient<IVectorDbService, VectorDbService>();
+builder.Services.AddHttpClient<IAzureSpeechService, AzureSpeechService>();
 builder.Services.AddHostedService<VectorSyncService>();
 
 // 4. AUTOMAPPER PROFİL HARİTALAMASINI KAYDET (HATAYI ÇÖZEN SATIR)
@@ -104,6 +105,23 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     dbContext.Database.Migrate();
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[DocumentSummaries]') AND name = 'AudioFilePath'
+            )
+            BEGIN
+                ALTER TABLE [DocumentSummaries] ADD [AudioFilePath] nvarchar(max) NULL;
+            END
+        ");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[DB Migration Auto-Fix]: {ex.Message}");
+    }
 
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     foreach (var role in new[] { UserRoles.Teacher, UserRoles.Student })

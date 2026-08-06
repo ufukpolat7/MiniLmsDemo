@@ -20,6 +20,8 @@ namespace MiniLms.Controllers
         private readonly IAiService _aiService;
         private readonly IVectorDbService _vectorDbService;
         private readonly ICourseDocumentService _courseDocumentService;
+        private readonly IAzureSpeechService _azureSpeechService;
+        private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _webHostEnvironment;
         private readonly MiniLms.Data.ApplicationDbContext _dbContext;
         private readonly Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> _userManager;
 
@@ -28,6 +30,8 @@ namespace MiniLms.Controllers
             IAiService aiService,
             IVectorDbService vectorDbService,
             ICourseDocumentService courseDocumentService,
+            IAzureSpeechService azureSpeechService,
+            Microsoft.AspNetCore.Hosting.IWebHostEnvironment webHostEnvironment,
             MiniLms.Data.ApplicationDbContext dbContext,
             Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> userManager)
         {
@@ -35,6 +39,8 @@ namespace MiniLms.Controllers
             _aiService = aiService;
             _vectorDbService = vectorDbService;
             _courseDocumentService = courseDocumentService;
+            _azureSpeechService = azureSpeechService;
+            _webHostEnvironment = webHostEnvironment;
             _dbContext = dbContext;
             _userManager = userManager;
         }
@@ -467,6 +473,77 @@ namespace MiniLms.Controllers
             {
                 Console.WriteLine($"[DocumentSummary Hata]: {ex.Message}\n{ex.StackTrace}");
                 return Json(new { success = false, response = $"Doküman özeti üretilirken bir sorun oluştu. Lütfen dokümanın geçerli bir PDF olduğundan emin olun ve tekrar deneyin." });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetAudioSummary(int courseId, int documentId, bool forceRefresh = false)
+        {
+            try
+            {
+                var document = await _courseDocumentService.GetDocumentByIdAsync(documentId);
+                if (document == null || document.CourseId != courseId)
+                {
+                    return Json(new { success = false, message = "Seçilen doküman bu derse ait değil veya bulunamadı." });
+                }
+
+                var currentUserId = _userManager.GetUserId(User);
+                if (string.IsNullOrEmpty(currentUserId))
+                {
+                    var currentUser = await _userManager.GetUserAsync(User);
+                    currentUserId = currentUser?.Id ?? "";
+                }
+
+                // 🎯 1. Kullanıcının kayıtlı özeti varsa kontrol et
+                var existingSummary = await _dbContext.DocumentSummaries
+                    .FirstOrDefaultAsync(s => s.CourseDocumentId == documentId && s.UserId == currentUserId);
+
+                // 🎯 2. Zorunlu yenileme istenmediyse ve ses dosyası zaten üretilmişse doğrudan dön
+                if (!forceRefresh && existingSummary != null && !string.IsNullOrWhiteSpace(existingSummary.AudioFilePath))
+                {
+                    string physicalPath = Path.Combine(_webHostEnvironment.WebRootPath, existingSummary.AudioFilePath.TrimStart('/'));
+                    if (System.IO.File.Exists(physicalPath))
+                    {
+                        return Json(new { 
+                            success = true, 
+                            audioUrl = existingSummary.AudioFilePath, 
+                            summaryText = existingSummary.SummaryText,
+                            isCached = true,
+                            hasAzureAudio = true
+                        });
+                    }
+                }
+
+                // 🎯 3. Özet metni henüz çıkarılmadıysa kullanıcıya önce metin özetini çıkartması gerektiğini bildir
+                if (existingSummary == null || string.IsNullOrWhiteSpace(existingSummary.SummaryText))
+                {
+                    return Json(new { 
+                        success = false, 
+                        message = "Bu dokümanın henüz özeti çıkarılmamış. Lütfen önce 'Özetle' butonuna tıklayarak dokümanın metin özetini oluşturun." 
+                    });
+                }
+
+                string textSummary = existingSummary.SummaryText;
+
+                // 🎯 4. Azure Speech ile ses dosyasını üret
+                string? audioUrl = await _azureSpeechService.GenerateAudioSummaryAsync(textSummary, documentId, currentUserId ?? "guest");
+
+                existingSummary.AudioFilePath = audioUrl;
+                _dbContext.DocumentSummaries.Update(existingSummary);
+
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { 
+                    success = true, 
+                    audioUrl = audioUrl, 
+                    summaryText = textSummary,
+                    hasAzureAudio = !string.IsNullOrWhiteSpace(audioUrl)
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[GetAudioSummary Hata]: {ex.Message}\n{ex.StackTrace}");
+                return Json(new { success = false, message = $"Sesli özet üretilirken bir sorun oluştu: {ex.Message}" });
             }
         }
 

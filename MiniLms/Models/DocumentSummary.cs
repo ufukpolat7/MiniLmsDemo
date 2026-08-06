@@ -21,6 +21,9 @@ namespace MiniLms.Models
         // Çıkarılan Özet Metni
         public string SummaryText { get; set; } = string.Empty;
 
+        // Üretilen Sesli Özet Dosya Yolu (MP3)
+        public string? AudioFilePath { get; set; }
+
         // Çıkarılma Tarihi
         public DateTime CreatedAt { get; set; } = DateTime.Now;
     }

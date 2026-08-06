@@ -126,12 +126,63 @@
                                 <i class="bi bi-chat-square-text"></i> <span id="aiResponseTitle">Asistanın Cevabı / Özet</span>
                                 <span id="summaryBadge" class="badge bg-success ms-1 d-none"></span>
                             </span>
-                            <div id="summaryActions" class="d-none d-flex gap-1">
+                            <div id="summaryActions" class="d-none d-flex gap-1 flex-wrap">
+                                <button type="button" class="btn btn-xs btn-outline-success btn-sm fw-bold" id="btnAudioSummary" title="Sesli Özet Dinle (Azure TTS)"><i class="bi bi-volume-up-fill"></i> Sesli Özet</button>
                                 <button type="button" class="btn btn-xs btn-outline-warning btn-sm" id="btnEditSummary" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i> Düzenle</button>
                                 <button type="button" class="btn btn-xs btn-outline-info btn-sm" id="btnRefreshSummary" title="Yeniden AI Özeti Üret"><i class="bi bi-arrow-clockwise"></i> Yeniden Üret</button>
                                 <button type="button" class="btn btn-xs btn-outline-danger btn-sm" id="btnDeleteSummary" title="Özeti Sil"><i class="bi bi-trash"></i> Sil</button>
                             </div>
                         </div>
+
+                        <!-- 🔊 Azure Sesli Özet Oynatıcı Paneli -->
+                        <div id="audioPlayerContainer" class="p-3 mb-2 bg-white rounded border d-none shadow-sm">
+                            <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+                                <div class="d-flex align-items-center gap-2">
+                                    <!-- ⏪ 10 sn Geri -->
+                                    <button type="button" id="btnRewind10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye Geri Al">
+                                        <i class="bi bi-arrow-counterclockwise fs-6"></i>
+                                    </button>
+
+                                    <!-- ▶️/⏸️ Oynat / Durdur -->
+                                    <button type="button" id="btnPlayAudio" class="btn btn-sm btn-success rounded-circle shadow-sm" style="width:40px; height:40px; padding:0;" title="Oynat / Durdur">
+                                        <i class="bi bi-play-fill fs-4"></i>
+                                    </button>
+
+                                    <!-- ⏩ 10 sn İleri -->
+                                    <button type="button" id="btnForward10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye İleri Al">
+                                        <i class="bi bi-arrow-clockwise fs-6"></i>
+                                    </button>
+
+                                    <div class="ms-1">
+                                        <span id="audioStatusText" class="small fw-bold text-dark d-block mb-0">Sesli Özet Oynatıcı</span>
+                                        <span id="audioSubText" class="small text-muted" style="font-size: 0.75rem;">Azure TTS Seslendirmesi</span>
+                                    </div>
+                                </div>
+
+                                <div class="d-flex align-items-center gap-2">
+                                    <span id="audioTimeCurrent" class="small fw-bold text-primary" style="font-size: 0.8rem;">00:00</span>
+                                    <span class="small text-muted">/</span>
+                                    <span id="audioTimeDuration" class="small text-muted" style="font-size: 0.8rem;">00:00</span>
+
+                                    <label class="small text-muted mb-0 ms-2">Hız:</label>
+                                    <select id="audioSpeedSelect" class="form-select form-select-sm py-0 px-2" style="width: auto; font-size: 0.8rem;">
+                                        <option value="1.0">1.0x</option>
+                                        <option value="1.25">1.25x</option>
+                                        <option value="1.5">1.5x</option>
+                                        <option value="2.0">2.0x</option>
+                                    </select>
+                                    <a id="btnDownloadAudio" href="#" download class="btn btn-sm btn-outline-secondary d-none" title="MP3 Dosyasını İndir"><i class="bi bi-download"></i> İndir</a>
+                                </div>
+                            </div>
+
+                            <!-- 🎚️ İlerleme / Kaydırma Çubuğu (Seek Slider) -->
+                            <div class="px-1">
+                                <input type="range" id="audioSeekBar" class="form-range" min="0" max="100" value="0" step="0.1" style="cursor: pointer;" />
+                            </div>
+
+                            <audio id="summaryAudioPlayer" class="w-100 mt-2 d-none" controls></audio>
+                        </div>
+
                         <div id="aiResponseText" class="text-dark" style="max-height: 400px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin;"></div>
                     </div>
 
@@ -195,6 +246,7 @@
                                             <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-success btn-sm btn-summary" title="Yapay Zeka ile Özet Çıkar"><i class="bi bi-magic"></i> Özetle</button>
                                         }
 
+                                        <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-success btn-sm btn-audio-summary-card" title="Sesli Özet Dinle"><i class="bi bi-volume-up-fill"></i> Sesli Dinle</button>
                                         <button type="button" data-id="@doc.Id" class="btn btn-xs btn-outline-primary btn-sm btn-quiz">Quiz</button>
 
                                         @if (User.IsInRole("Teacher"))
@@ -503,6 +555,9 @@
         var editSummaryModal = new bootstrap.Modal(document.getElementById("editSummaryModal"));
 
         function loadDocumentSummary(docId, forceRefresh) {
+            stopCurrentAudioPlayback();
+            $("#audioPlayerContainer").addClass("d-none");
+
             var courseId = '@Model.Id';
             var container = $("#aiResponseContainer");
             var txt = $("#aiResponseText");
@@ -602,6 +657,226 @@
             }
         });
 
+        // 🎯 🔊 Azure Sesli Özet Oluştur & Dinle (Audio Summary)
+        var audioState = {
+            isPlaying: false
+        };
+
+        var activeAudioRequestId = 0;
+
+        function stopCurrentAudioPlayback() {
+            var player = document.getElementById("summaryAudioPlayer");
+            if (player) {
+                try {
+                    player.pause();
+                    player.currentTime = 0;
+                    player.removeAttribute("src");
+                    player.load();
+                } catch (e) { }
+            }
+            if ('speechSynthesis' in window) {
+                try { window.speechSynthesis.cancel(); } catch (e) { }
+            }
+            audioState.isPlaying = false;
+            $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>').prop("disabled", false);
+            $("#audioTimeCurrent").text("00:00");
+            $("#audioTimeDuration").text("00:00");
+            $("#audioSeekBar").val(0);
+        }
+
+        function triggerAudioSummaryForDocument(docId) {
+            if (!docId) return;
+
+            // 🎯 1. Mevcut çalan tüm sesleri ve eski istekleri derhal durdur
+            stopCurrentAudioPlayback();
+
+            var thisRequestId = ++activeAudioRequestId;
+            activeSummaryState.documentId = parseInt(docId);
+
+            var container = $("#aiResponseContainer");
+            container.removeClass("d-none");
+            $("#summaryActions").removeClass("d-none");
+            $('html, body').animate({ scrollTop: container.offset().top - 100 }, 400);
+
+            // 🎯 2. Ses çalarını yeni doküman için yükleniyor moduna al
+            $("#audioPlayerContainer").removeClass("d-none");
+            $("#audioStatusText").text("Sesli Özet Hazırlanıyor...");
+            $("#audioSubText").text("Yapay Zeka Ses Servisi Bağlanıyor");
+            $("#btnPlayAudio").html('<div class="spinner-border spinner-border-sm text-light" role="status"></div>').prop("disabled", true);
+
+            var courseId = '@Model.Id';
+
+            $.ajax({
+                url: '@Url.Action("GetAudioSummary", "Course")',
+                type: 'GET',
+                data: { courseId: courseId, documentId: docId },
+                success: function (res) {
+                    // Kullanıcı bu esnada başka bir dokümana tıkladıysa eski isteği iptal et
+                    if (thisRequestId !== activeAudioRequestId) return;
+
+                    $("#btnPlayAudio").prop("disabled", false);
+
+                    if (res.success) {
+                        if (res.summaryText) {
+                            activeSummaryState.rawText = res.summaryText;
+                            $("#aiResponseText").html(formatAiResponseToHtml(res.summaryText));
+                        }
+
+                        if (res.audioUrl) {
+                            var player = document.getElementById("summaryAudioPlayer");
+                            player.src = res.audioUrl;
+                            $("#btnDownloadAudio").attr("href", res.audioUrl).removeClass("d-none");
+                            $("#audioStatusText").text("Sesli Özet Hazır");
+                            $("#audioSubText").text(res.hasAzureAudio ? "Azure TTS Ses Kaydı (MP3)" : "Türkçe Yüksek Kalite Ses Kaydı");
+                            $("#btnPlayAudio").html('<i class="bi bi-pause-fill fs-4"></i>');
+                            
+                            var playPromise = player.play();
+                            if (playPromise !== undefined) {
+                                playPromise.then(function () {
+                                    audioState.isPlaying = true;
+                                }).catch(function (err) {
+                                    console.log("Audio play exception:", err);
+                                    $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>');
+                                });
+                            }
+
+                            player.onended = function () {
+                                audioState.isPlaying = false;
+                                $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>');
+                            };
+                        } else {
+                            $("#audioStatusText").text("Yerel Sesli Özet Oynatılıyor");
+                            $("#audioSubText").text("Tarayıcı Türkçe Ses Motoru (Web Speech API)");
+                            speakLocalText(res.summaryText || activeSummaryState.rawText);
+                        }
+                    } else {
+                        stopCurrentAudioPlayback();
+                        $("#audioPlayerContainer").addClass("d-none");
+                        alert("⚠️ " + res.message);
+                    }
+                },
+                error: function () {
+                    if (thisRequestId !== activeAudioRequestId) return;
+                    stopCurrentAudioPlayback();
+                    $("#audioPlayerContainer").addClass("d-none");
+                    alert("Sesli özet servisine bağlanırken sunucu hatası oluştu.");
+                }
+            });
+        }
+
+        $(document).on("click", ".btn-audio-summary-card", function () {
+            var docId = $(this).data("id");
+            triggerAudioSummaryForDocument(docId);
+        });
+
+        $("#btnAudioSummary").click(function () {
+            var docId = activeSummaryState.documentId || $("#documentIdSelect").val();
+            if (!docId) {
+                alert("Lütfen bir doküman seçin veya bir dokümanın yanındaki 'Sesli Dinle' butonuna tıklayın.");
+                return;
+            }
+            triggerAudioSummaryForDocument(docId);
+        });
+
+        function formatAudioTime(seconds) {
+            if (isNaN(seconds) || seconds < 0) return "00:00";
+            var mins = Math.floor(seconds / 60);
+            var secs = Math.floor(seconds % 60);
+            return (mins < 10 ? "0" + mins : mins) + ":" + (secs < 10 ? "0" + secs : secs);
+        }
+
+        var playerElement = document.getElementById("summaryAudioPlayer");
+        if (playerElement) {
+            playerElement.ontimeupdate = function () {
+                if (playerElement.duration) {
+                    var percent = (playerElement.currentTime / playerElement.duration) * 100;
+                    $("#audioSeekBar").val(percent);
+                    $("#audioTimeCurrent").text(formatAudioTime(playerElement.currentTime));
+                }
+            };
+
+            playerElement.onloadedmetadata = function () {
+                $("#audioTimeDuration").text(formatAudioTime(playerElement.duration));
+            };
+        }
+
+        $("#audioSeekBar").on("input change", function () {
+            if (playerElement && playerElement.duration) {
+                var seekTo = ($(this).val() / 100) * playerElement.duration;
+                playerElement.currentTime = seekTo;
+            }
+        });
+
+        // ⏪ 10 Saniye Geri Al
+        $("#btnRewind10").click(function () {
+            if (playerElement && playerElement.src) {
+                playerElement.currentTime = Math.max(0, playerElement.currentTime - 10);
+            }
+        });
+
+        // ⏩ 10 Saniye İleri Al
+        $("#btnForward10").click(function () {
+            if (playerElement && playerElement.src) {
+                playerElement.currentTime = Math.min(playerElement.duration || 0, playerElement.currentTime + 10);
+            }
+        });
+
+        // 🎯 Oynat / Durdur Butonu
+        $("#btnPlayAudio").click(function () {
+            var player = document.getElementById("summaryAudioPlayer");
+            if (player && player.src && player.src !== window.location.href) {
+                if (player.paused) {
+                    player.play();
+                    $(this).html('<i class="bi bi-pause-fill fs-4"></i>');
+                } else {
+                    player.pause();
+                    $(this).html('<i class="bi bi-play-fill fs-4"></i>');
+                }
+            } else if (window.speechSynthesis) {
+                if (window.speechSynthesis.speaking) {
+                    if (window.speechSynthesis.paused) {
+                        window.speechSynthesis.resume();
+                        $(this).html('<i class="bi bi-pause-fill fs-4"></i>');
+                    } else {
+                        window.speechSynthesis.pause();
+                        $(this).html('<i class="bi bi-play-fill fs-4"></i>');
+                    }
+                }
+            }
+        });
+
+        // 🎯 Oynatma Hızı Değiştirme
+        $("#audioSpeedSelect").change(function () {
+            var speed = parseFloat($(this).val());
+            var player = document.getElementById("summaryAudioPlayer");
+            if (player && player.src) {
+                player.playbackRate = speed;
+            }
+        });
+
+        // 🎯 Yerel Tarayıcı Türkçe Ses Motoru (SpeechSynthesis Fallback)
+        function speakLocalText(rawText) {
+            if (!('speechSynthesis' in window)) {
+                alert("Tarayıcınız ses sentezleme özelliğini desteklemiyor.");
+                return;
+            }
+            window.speechSynthesis.cancel();
+
+            var cleanText = rawText.replace(/#+/g, '').replace(/\*\*/g, '').replace(/[-•]/g, '').trim();
+            var utterance = new SpeechSynthesisUtterance(cleanText.substring(0, 1500));
+            utterance.lang = 'tr-TR';
+            utterance.rate = parseFloat($("#audioSpeedSelect").val() || "1.0");
+
+            utterance.onstart = function () {
+                $("#btnPlayAudio").html('<i class="bi bi-pause-fill fs-5"></i>');
+            };
+            utterance.onend = function () {
+                $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-5"></i>');
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
         // 🎯 Özeti Düzenle Modalını Aç
         $("#btnEditSummary").click(function () {
             if (!activeSummaryState.summaryId) return;
@@ -650,10 +925,7 @@
                     success: function (res) {
                         if (res.success) {
                             alert(res.message);
-                            $("#summary-row-" + activeSummaryState.summaryId).fadeOut(300, function () { $(this).remove(); });
-                            $("#aiResponseContainer").addClass("d-none");
-                            activeSummaryState.summaryId = null;
-                            activeSummaryState.documentId = null;
+                            location.reload();
                         } else {
                             alert("Hata: " + res.message);
                         }
@@ -734,12 +1006,8 @@
                     data: { summaryId: summaryId },
                     success: function (res) {
                         if (res.success) {
-                            $("#summary-row-" + summaryId).fadeOut(300, function () { $(this).remove(); });
-                            if (activeSummaryState.summaryId == summaryId) {
-                                $("#aiResponseContainer").addClass("d-none");
-                                activeSummaryState.summaryId = null;
-                            }
-                            alert("Özet silindi.");
+                            alert("Özet başarıyla silindi.");
+                            location.reload();
                         } else {
                             alert("Hata: " + res.message);
                         }
