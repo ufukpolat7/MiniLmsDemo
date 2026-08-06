@@ -171,6 +171,17 @@
                                         <option value="1.5">1.5x</option>
                                         <option value="2.0">2.0x</option>
                                     </select>
+
+                                    <!-- 🔄 Yeniden Ses Üret -->
+                                    <button type="button" id="btnRefreshAudioSummary" class="btn btn-sm btn-outline-warning text-dark px-2" title="Yeniden Sesli Özet Üret">
+                                        <i class="bi bi-arrow-repeat"></i> Yeniden Üret
+                                    </button>
+
+                                    <!-- 🗑️ Sesi Sil -->
+                                    <button type="button" id="btnDeleteAudioSummary" class="btn btn-sm btn-outline-danger px-2" title="Ses Kaydını Sil">
+                                        <i class="bi bi-trash"></i> Sesi Sil
+                                    </button>
+
                                     <a id="btnDownloadAudio" href="#" download class="btn btn-sm btn-outline-secondary d-none" title="MP3 Dosyasını İndir"><i class="bi bi-download"></i> İndir</a>
                                 </div>
                             </div>
@@ -684,10 +695,9 @@
             $("#audioSeekBar").val(0);
         }
 
-        function triggerAudioSummaryForDocument(docId) {
+        function triggerAudioSummaryForDocument(docId, forceRefresh) {
             if (!docId) return;
 
-            // 🎯 1. Mevcut çalan tüm sesleri ve eski istekleri derhal durdur
             stopCurrentAudioPlayback();
 
             var thisRequestId = ++activeAudioRequestId;
@@ -698,10 +708,9 @@
             $("#summaryActions").removeClass("d-none");
             $('html, body').animate({ scrollTop: container.offset().top - 100 }, 400);
 
-            // 🎯 2. Ses çalarını yeni doküman için yükleniyor moduna al
             $("#audioPlayerContainer").removeClass("d-none");
-            $("#audioStatusText").text("Sesli Özet Hazırlanıyor...");
-            $("#audioSubText").text("Yapay Zeka Ses Servisi Bağlanıyor");
+            $("#audioStatusText").text(forceRefresh ? "Yeni Sesli Özet Üretiliyor..." : "Sesli Özet Yükleniyor...");
+            $("#audioSubText").text(forceRefresh ? "Edge Nöral Seslendirmesi Yapılıyor..." : "Önbellekten veya Ses Servisinden Çekiliyor");
             $("#btnPlayAudio").html('<div class="spinner-border spinner-border-sm text-light" role="status"></div>').prop("disabled", true);
 
             var courseId = '@Model.Id';
@@ -709,9 +718,8 @@
             $.ajax({
                 url: '@Url.Action("GetAudioSummary", "Course")',
                 type: 'GET',
-                data: { courseId: courseId, documentId: docId },
+                data: { courseId: courseId, documentId: docId, forceRefresh: forceRefresh === true },
                 success: function (res) {
-                    // Kullanıcı bu esnada başka bir dokümana tıkladıysa eski isteği iptal et
                     if (thisRequestId !== activeAudioRequestId) return;
 
                     $("#btnPlayAudio").prop("disabled", false);
@@ -727,7 +735,7 @@
                             player.src = res.audioUrl;
                             $("#btnDownloadAudio").attr("href", res.audioUrl).removeClass("d-none");
                             $("#audioStatusText").text("Sesli Özet Hazır");
-                            $("#audioSubText").text(res.hasAzureAudio ? "Azure TTS Ses Kaydı (MP3)" : "Türkçe Yüksek Kalite Ses Kaydı");
+                            $("#audioSubText").text(res.isCached ? "💾 Önbellekten Yüklendi (Kayıtlı Ses)" : "✨ Microsoft Edge Nöral TTS (Yeni Ses)");
                             $("#btnPlayAudio").html('<i class="bi bi-pause-fill fs-4"></i>');
                             
                             var playPromise = player.play();
@@ -763,6 +771,42 @@
                 }
             });
         }
+
+        // 🔄 Yeniden Sesli Özet Üret (Force Refresh)
+        $(document).on("click", "#btnRefreshAudioSummary", function () {
+            var docId = activeSummaryState.documentId;
+            if (!docId) return;
+            if (confirm("Bu dokümanın sesli özetini yeniden ürettirmek istediğinizden emin misiniz?")) {
+                triggerAudioSummaryForDocument(docId, true);
+            }
+        });
+
+        // 🗑️ Dokümana Ait Ses Kaydını Sil
+        $(document).on("click", "#btnDeleteAudioSummary", function () {
+            var docId = activeSummaryState.documentId;
+            if (!docId) return;
+            if (confirm("Bu dokümana ait ses kaydını veritabanından ve sunucudan silmek istediğinize emin misiniz?")) {
+                var courseId = '@Model.Id';
+                stopCurrentAudioPlayback();
+                $("#audioPlayerContainer").addClass("d-none");
+
+                $.ajax({
+                    url: '@Url.Action("DeleteAudioSummary", "Course")',
+                    type: 'POST',
+                    data: { courseId: courseId, documentId: docId },
+                    success: function (res) {
+                        if (res.success) {
+                            alert("✅ " + res.message);
+                        } else {
+                            alert("⚠️ " + res.message);
+                        }
+                    },
+                    error: function () {
+                        alert("Ses kaydı silinirken sunucu hatası oluştu.");
+                    }
+                });
+            }
+        });
 
         $(document).on("click", ".btn-audio-summary-card", function () {
             var docId = $(this).data("id");

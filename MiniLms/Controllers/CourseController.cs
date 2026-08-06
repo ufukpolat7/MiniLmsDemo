@@ -547,6 +547,43 @@ namespace MiniLms.Controllers
             }
         }
 
+        // 🎯 DOKÜMANA AİT SES KAYDINI SİL
+        [HttpPost]
+        public async Task<IActionResult> DeleteAudioSummary(int courseId, int documentId)
+        {
+            try
+            {
+                var currentUserId = _userManager.GetUserId(User);
+                if (string.IsNullOrEmpty(currentUserId))
+                {
+                    var currentUser = await _userManager.GetUserAsync(User);
+                    currentUserId = currentUser?.Id ?? "";
+                }
+
+                var summary = await _dbContext.DocumentSummaries
+                    .FirstOrDefaultAsync(s => s.CourseDocumentId == documentId && s.UserId == currentUserId);
+
+                if (summary != null && !string.IsNullOrWhiteSpace(summary.AudioFilePath))
+                {
+                    string physicalPath = Path.Combine(_webHostEnvironment.WebRootPath, summary.AudioFilePath.TrimStart('/'));
+                    if (System.IO.File.Exists(physicalPath))
+                    {
+                        try { System.IO.File.Delete(physicalPath); } catch { }
+                    }
+
+                    summary.AudioFilePath = null;
+                    _dbContext.DocumentSummaries.Update(summary);
+                    await _dbContext.SaveChangesAsync();
+                }
+
+                return Json(new { success = true, message = "Dokümana ait ses kaydı veritabanından ve sunucudan başarıyla silindi." });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Ses kaydı silinirken hata oluştu: {ex.Message}" });
+            }
+        }
+
         // 🎯 ÖĞRETMENİN ÖĞRENCİ BAZLI PDF ÖZETLERİNİ GÖRÜNTÜLEMESİ
         [HttpGet]
         [Authorize(Policy = UserPolicies.TeacherOnly)]

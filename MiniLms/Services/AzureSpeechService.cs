@@ -6,8 +6,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MiniLms.Services
@@ -55,23 +57,35 @@ namespace MiniLms.Services
                 string relativePath = $"/audio_summaries/summary_{documentId}_{userId}_{Guid.NewGuid().ToString().Substring(0, 8)}.mp3";
                 string physicalPath = Path.Combine(_environment.WebRootPath, relativePath.TrimStart('/'));
 
-                string apiKey = _configuration["AzureSpeech:SubscriptionKey"] ?? "";
-                string region = _configuration["AzureSpeech:Region"] ?? "westeurope";
                 string voiceName = _configuration["AzureSpeech:VoiceName"] ?? "tr-TR-EmelNeural";
 
-                // 🎯 1. ADIM: Azure Speech Key tanımlıysa Azure REST API kullan
+                // 🎯 1. ADIM (BİRİNCİL): Microsoft Edge Free Nöral TTS (%100 Ücretsiz tr-TR-EmelNeural)
+                _logger.LogInformation("[Edge Free Neural TTS]: Microsoft Edge Ücretsiz Nöral TTS (tr-TR-EmelNeural) ile MP3 üretiliyor...");
+                string? edgeMp3 = await GenerateEdgeNeuralMp3Async(cleanText, physicalPath, relativePath, voiceName);
+                if (!string.IsNullOrEmpty(edgeMp3))
+                {
+                    _logger.LogInformation($"[Edge Free Neural TTS Success]: Ücretsiz Edge Nöral MP3 üretildi: {relativePath}");
+                    return relativePath;
+                }
+
+                // 🎯 2. ADIM: Azure Key tanımlıysa yedek olarak Azure REST API kullan
+                string apiKey = _configuration["AzureSpeech:SubscriptionKey"] ?? "";
+                string region = _configuration["AzureSpeech:Region"] ?? "westeurope";
                 if (!string.IsNullOrWhiteSpace(apiKey))
                 {
+                    _logger.LogInformation("[Azure Speech Backup]: Azure REST API deneniyor...");
                     string ttsUrl = $"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1";
                     string ssml = $@"<speak version='1.0' xml:lang='tr-TR'>
     <voice xml:lang='tr-TR' name='{voiceName}'>
-        {System.Security.SecurityElement.Escape(cleanText)}
+        <prosody rate='-3%' pitch='0%'>
+            {System.Security.SecurityElement.Escape(cleanText)}
+        </prosody>
     </voice>
 </speak>";
 
                     using var request = new HttpRequestMessage(HttpMethod.Post, ttsUrl);
                     request.Headers.Add("Ocp-Apim-Subscription-Key", apiKey);
-                    request.Headers.Add("X-Microsoft-OutputFormat", "audio-16khz-128kbitrate-mono-mp3");
+                    request.Headers.Add("X-Microsoft-OutputFormat", "audio-24khz-160kbitrate-mono-mp3");
                     request.Headers.Add("User-Agent", "MiniLmsApp");
                     request.Content = new StringContent(ssml, Encoding.UTF8, "application/ssml+xml");
 
@@ -80,33 +94,71 @@ namespace MiniLms.Services
                     {
                         byte[] audioBytes = await response.Content.ReadAsByteArrayAsync();
                         await File.WriteAllBytesAsync(physicalPath, audioBytes);
-                        _logger.LogInformation($"[Azure Speech Success]: Türkçe MP3 sesli özet üretildi: {relativePath}");
                         return relativePath;
-                    }
-                    else
-                    {
-                        string errContent = await response.Content.ReadAsStringAsync();
-                        _logger.LogError($"[Azure Speech Error]: StatusCode={response.StatusCode}, Detail={errContent}");
                     }
                 }
 
-                // 🎯 2. ADIM: Azure Key yoksa veya başarısızsa Google Türkçe (tr-TR) Yüksek Kalite TTS Servisini Kullan
-                _logger.LogInformation("[Speech Fallback]: Türkçe Yüksek Kalite Google TTS servisi ile MP3 üretiliyor...");
+                // 🎯 3. ADIM: Google Türkçe TTS (Yedek)
+                _logger.LogInformation("[Google TTS Fallback]: Google Türkçe TTS servisi deneniyor...");
                 string? googleMp3Path = await GenerateGoogleTurkishMp3Async(cleanText, physicalPath, relativePath);
                 if (!string.IsNullOrEmpty(googleMp3Path))
                 {
                     return googleMp3Path;
                 }
 
-                // 🎯 3. ADIM: Ağ erişimi yoksa PowerShell üzerinden Türkçe Ses Filtreli SAPI Kullan
-                _logger.LogWarning("[Speech Fallback]: Yerel Türkçe Filtreli Sistem SAPI kullanılıyor...");
+                // 🎯 4. ADIM: Yerel SAPI (Ağ tamamen kopuksa)
+                _logger.LogWarning("[SAPI Fallback]: Yerel Türkçe Filtreli Sistem SAPI kullanılıyor...");
                 return GenerateLocalTurkishSapiWav(cleanText, documentId, userId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Speech Exception]: Sesli özet oluşturulurken hata.");
+                _logger.LogError(ex, "[Speech Exception]: Sesli özet üretilirken hata.");
                 return null;
             }
+        }
+
+        private async Task<string?> GenerateEdgeNeuralMp3Async(string text, string physicalPath, string relativePath, string voiceName)
+        {
+            try
+            {
+                string selectedVoice = string.IsNullOrWhiteSpace(voiceName) ? "tr-TR-EmelNeural" : voiceName;
+                
+                string tempTxtPath = Path.Combine(Path.GetTempPath(), $"edge_tts_{Guid.NewGuid():N}.txt");
+                await File.WriteAllTextAsync(tempTxtPath, text, Encoding.UTF8);
+
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c edge-tts --file \"{tempTxtPath}\" --voice {selectedVoice} --write-media \"{physicalPath}\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc != null)
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                    await proc.WaitForExitAsync(cts.Token);
+                }
+
+                if (File.Exists(tempTxtPath))
+                {
+                    try { File.Delete(tempTxtPath); } catch { }
+                }
+
+                if (File.Exists(physicalPath) && new FileInfo(physicalPath).Length > 0)
+                {
+                    _logger.LogInformation($"[Edge Free Neural TTS Success]: Microsoft Edge '{selectedVoice}' MP3 üretildi ({new FileInfo(physicalPath).Length} bytes): {relativePath}");
+                    return relativePath;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Edge TTS Error]: Edge Nöral TTS CLI ile ses üretilirken hata oluştu.");
+            }
+            return null;
         }
 
         private async Task<string?> GenerateGoogleTurkishMp3Async(string text, string physicalPath, string relativePath)
@@ -130,7 +182,7 @@ namespace MiniLms.Services
                         byte[] chunkBytes = await resp.Content.ReadAsByteArrayAsync();
                         await memoryStream.WriteAsync(chunkBytes, 0, chunkBytes.Length);
                     }
-                    await Task.Delay(150); // Hız sınırına takılmamak için kısa bekleme
+                    await Task.Delay(100);
                 }
 
                 if (memoryStream.Length > 0)
@@ -252,8 +304,26 @@ $s.Dispose();
             clean = Regex.Replace(clean, @"\*\*([^*]+)\*\*", "$1");
             clean = Regex.Replace(clean, @"\*([^*]+)\*", "$1");
             clean = Regex.Replace(clean, @"(?m)^\s*[-•*]\s*", "");
-
             clean = Regex.Replace(clean, @"<[^>]+>", "");
+
+            // 🎯 Akademik Terimleri & Kısaltmaları Türkçe Okunuşlarına Çevirme
+            clean = Regex.Replace(clean, @"\bP2P\b", "Pii to Pii", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bTCP/IP\b", "Tee Cee Pee ıı Pee", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bTCP\b", "Tee Cee Pee", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bUDP\b", "Yuu Dee Pee", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bHTTP\b", "Ha Teee Teee Pee", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bHTTPS\b", "Ha Teee Teee Pee Es", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bIP\b", "Ay Pee", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bDNS\b", "Dee En Es", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bCPU\b", "Cee Pee Yuu", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bRAM\b", "Rem", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bPDF\b", "Pee Dee Ef", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bIEEE\b", "I Üçlü E", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bvb\.\b", "ve benzeri", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bvs\.\b", "ve saire", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bms\b", "milisaniye", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bsn\b", "saniye", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\bdk\b", "dakika", RegexOptions.IgnoreCase);
 
             clean = Regex.Replace(clean, @"DERS REHBERİ\s*", "");
             clean = Regex.Replace(clean, @"Bu rehber, ilgili derse ait[^\n]*\n?", "");
