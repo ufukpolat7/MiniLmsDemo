@@ -201,6 +201,8 @@ namespace MiniLms.Controllers
 
         [HttpPost]
         [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [RequestSizeLimit(104857600)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 104857600)]
         public async Task<IActionResult> UploadDocument(int courseId, IFormFile file)
         {
             if (file == null || file.Length == 0)

@@ -82,6 +82,15 @@ namespace MiniLms.Services
             var document = await _context.CourseDocuments.FindAsync(id);
             if (document != null)
             {
+                // 🎯 0. Bu dökümana bağlı DocumentSummaries kayıtlarını sil (SQL FK hatasını engellemek için)
+                var associatedSummaries = await _context.DocumentSummaries
+                    .Where(s => s.CourseDocumentId == id)
+                    .ToListAsync();
+                if (associatedSummaries.Any())
+                {
+                    _context.DocumentSummaries.RemoveRange(associatedSummaries);
+                }
+
                 // 1. Bu dökümana ait LessonContents (parçalanmış metin) kayıtlarını SQL'den çek
                 var associatedContents = await _context.LessonContents
                     .Where(content => content.ResourceUrl == document.FilePath)
@@ -93,10 +102,7 @@ namespace MiniLms.Services
                     var associatedLessonIds = associatedContents.Select(c => c.LessonId).Distinct().ToList();
 
                     // 2. Yapay zeka belleğinden (Qdrant) bu parçaların vektörlerini sil
-                    // Senkronizasyon servisindeki Id eşleşmesine göre listeyi ulong/long olarak hazırlıyoruz
                     var pointIds = associatedContents.Select(c => (long)c.Id).ToList();
-
-                    // Not: IVectorDbService'inizdeki metot imzanıza göre DeleteVectorsAsync veya DeleteVectorAsync çağırabilirsiniz
                     await _vectorDbService.DeleteVectorAsync(pointIds);
 
                     // 3. SQL Veritabanındaki parçalanmış LessonContents kayıtlarını temizle
@@ -176,12 +182,28 @@ namespace MiniLms.Services
 
             foreach (var document in documents)
             {
-                bool topicsAlreadyCreated = await _context.LessonContents
-                    .AnyAsync(content => content.ResourceUrl == document.FilePath && content.Type == "DocumentTopic");
+                var existingTopics = await _context.LessonContents
+                    .Where(content => content.ResourceUrl == document.FilePath && content.Type == "DocumentTopic")
+                    .ToListAsync();
 
-                if (topicsAlreadyCreated)
+                // Eğer eski gürültülü veya nokta başlığı içeren başlıklar varsa temizle ve yenile
+                bool needsRebuild = existingTopics.Count == 0 || existingTopics.Any(t => t.Text.StartsWith("Kaynak dokümandan") || t.Title.EndsWith(":") || t.Title.EndsWith(".") || t.Title.Contains("Doküman Konuları: ."));
+
+                if (!needsRebuild)
                 {
                     continue;
+                }
+
+                if (existingTopics.Count > 0)
+                {
+                    var lessonIds = existingTopics.Select(t => t.LessonId).Distinct().ToList();
+                    _context.LessonContents.RemoveRange(existingTopics);
+                    
+                    var oldLessons = await _context.Lessons
+                        .Where(l => lessonIds.Contains(l.Id) && !l.Contents.Any(c => c.Type != "DocumentTopic"))
+                        .ToListAsync();
+                    _context.Lessons.RemoveRange(oldLessons);
+                    await _context.SaveChangesAsync();
                 }
 
                 string extractedText = await ReadDocumentTextAsync(document);
@@ -303,10 +325,21 @@ namespace MiniLms.Services
                 .Select(l => (int?)l.WeekNumber)
                 .MaxAsync() ?? 0;
 
+            string rawFileName = Path.GetFileNameWithoutExtension(document.FileName);
+            string cleanDocName = rawFileName;
+            string candidateDocName = Regex.Replace(cleanDocName, @"^(Bölüm|Hafta|Ders|Konu)\s*\d+[\s\-_.]*", "", RegexOptions.IgnoreCase).Trim();
+            candidateDocName = Regex.Replace(candidateDocName, @"(Derlenmi[şs]?|Ders|Notu|Notları)\s*", "", RegexOptions.IgnoreCase).Trim();
+            candidateDocName = candidateDocName.Trim('.', '-', '_', ' ');
+
+            if (!string.IsNullOrWhiteSpace(candidateDocName) && candidateDocName.Count(char.IsLetter) >= 3)
+            {
+                cleanDocName = candidateDocName;
+            }
+
             var topicLesson = new Lesson
             {
                 CourseId = courseId,
-                Title = $"Doküman Konuları: {Path.GetFileNameWithoutExtension(document.FileName)}",
+                Title = $"Doküman Konuları: {cleanDocName}",
                 WeekNumber = nextWeekNumber + 1
             };
 
@@ -317,11 +350,13 @@ namespace MiniLms.Services
             foreach (string heading in topicHeadings)
             {
                 order++;
+                string headingDesc = ExtractHeadingDescription(extractedText, heading);
+
                 await _context.LessonContents.AddAsync(new LessonContent
                 {
                     LessonId = topicLesson.Id,
-                    Title = heading,
-                    Text = $"Kaynak dokümandan çıkarılan konu başlığı: {heading}",
+                    Title = $"{order}. {heading}",
+                    Text = headingDesc,
                     Body = heading,
                     ResourceUrl = document.FilePath,
                     Order = order,
@@ -375,21 +410,21 @@ namespace MiniLms.Services
             foreach (string line in lines)
             {
                 AddTopic(topics, line);
-                if (topics.Count >= 18)
+                if (topics.Count >= 12)
                 {
                     return topics;
                 }
             }
 
-            if (topics.Count < 4)
+            if (topics.Count < 3)
             {
                 foreach (Match match in Regex.Matches(
                     normalizedText,
-                    @"(?:^|[.!?]\s+)((?:\d+(?:\.\d+)*\.?\s+|Hafta\s+\d+[:\-.]?\s+|Bölüm\s+\d+[:\-.]?\s+|Chapter\s+\d+[:\-.]?\s+|Lecture\s+\d+[:\-.]?\s+)[A-ZÇĞİÖŞÜa-zçğıöşü][^.!?\r\n]{4,90})",
+                    @"(?:^|[.!?]\s+)((?:\d+(?:\.\d+)*\.?\s+|Hafta\s+\d+[:\-.]?\s+|Bölüm\s+\d+[:\-.]?\s+|Chapter\s+\d+[:\-.]?\s+|Lecture\s+\d+[:\-.]?\s+)[A-ZÇĞİÖŞÜa-zçğıöşü][^.!?\r\n]{4,85})",
                     RegexOptions.IgnoreCase))
                 {
                     AddTopic(topics, CleanHeading(match.Groups[1].Value));
-                    if (topics.Count >= 18)
+                    if (topics.Count >= 12)
                     {
                         return topics;
                     }
@@ -404,31 +439,80 @@ namespace MiniLms.Services
             return topics;
         }
 
+        private static string ExtractHeadingDescription(string fullText, string heading)
+        {
+            if (string.IsNullOrWhiteSpace(fullText) || string.IsNullOrWhiteSpace(heading))
+            {
+                return "İlgili dokümandan elde edilen ders konusu ve çalışma alanı.";
+            }
+
+            int idx = fullText.IndexOf(heading, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                string afterText = fullText.Substring(idx + heading.Length).Trim();
+                var sentences = afterText.Split(new[] { '.', '!', '?', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                         .Select(s => s.Trim())
+                                         .Where(s => s.Length >= 15 && !s.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                                         .ToList();
+
+                if (sentences.Count > 0)
+                {
+                    string candidate = sentences[0];
+                    if (candidate.Length > 140)
+                    {
+                        candidate = TruncateAtWord(candidate, 130) + "...";
+                    }
+                    return candidate;
+                }
+            }
+
+            return "Doküman içeriğinden çıkarılan akademik ders başlığı ve inceleme konusu.";
+        }
+
         private static string CleanHeading(string heading)
         {
-            heading = Regex.Replace(heading ?? string.Empty, @"\s+", " ").Trim();
+            if (string.IsNullOrWhiteSpace(heading)) return string.Empty;
+
+            heading = Regex.Replace(heading, @"\s+", " ").Trim();
             heading = Regex.Replace(heading, @"^[•\-–—*]+\s*", string.Empty).Trim();
+            heading = Regex.Replace(heading, @"^\d+(\.\d+)*\.?\s*", string.Empty).Trim();
             heading = Regex.Replace(heading, @"\s+\.{2,}\s*\d+$", string.Empty).Trim();
             heading = heading.Trim(':', '-', '–', '—', '.', ' ');
 
-            return heading.Length > 110
-                ? heading.Substring(0, 110).Trim()
-                : heading;
+            if (heading.Length > 90)
+            {
+                heading = TruncateAtWord(heading, 85);
+            }
+
+            return heading;
+        }
+
+        private static string TruncateAtWord(string input, int length)
+        {
+            if (string.IsNullOrWhiteSpace(input) || input.Length <= length) return input ?? string.Empty;
+
+            int lastSpace = input.Substring(0, length).LastIndexOf(' ');
+            if (lastSpace > 20)
+            {
+                return input.Substring(0, lastSpace).Trim();
+            }
+            return input.Substring(0, length).Trim();
         }
 
         private static bool IsLikelyHeading(string line)
         {
-            if (string.IsNullOrWhiteSpace(line) || line.Length < 4 || line.Length > 110)
+            if (string.IsNullOrWhiteSpace(line) || line.Length < 4 || line.Length > 115)
             {
                 return false;
             }
 
-            if (line.Count(char.IsLetter) < 3 || line.EndsWith(",", StringComparison.Ordinal))
+            if (line.Count(char.IsLetter) < 4 || line.EndsWith(","))
             {
                 return false;
             }
 
-            if (Regex.IsMatch(line, @"^(table|figure|şekil|tablo|page|sayfa|references|kaynakça)\b", RegexOptions.IgnoreCase))
+            // Slayt sunu gürültüsü ve açıklama cümlelerini filtrele
+            if (Regex.IsMatch(line, @"(slayt[ıa]?|omurgasını|vurgu|kullanıcıya|bu başlık|bu özet|şekil|tablo|page|sayfa|references|kaynakça)", RegexOptions.IgnoreCase))
             {
                 return false;
             }
@@ -440,16 +524,16 @@ namespace MiniLms.Services
 
             int letterCount = line.Count(char.IsLetter);
             int upperCount = line.Count(char.IsUpper);
-            bool mostlyUpper = letterCount > 0 && upperCount >= Math.Max(3, (int)(letterCount * 0.65));
+            bool mostlyUpper = letterCount > 0 && upperCount >= Math.Max(3, (int)(letterCount * 0.45));
 
-            if (mostlyUpper && line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 10)
+            if (mostlyUpper && line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 12)
             {
                 return true;
             }
 
-            bool shortTitle = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 8 &&
-                              !line.Contains(". ") &&
-                              !line.EndsWith(".", StringComparison.Ordinal);
+            bool shortTitle = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 10 &&
+                               !line.Contains(". ") &&
+                               !line.EndsWith(".", StringComparison.Ordinal);
 
             return shortTitle && char.IsUpper(line[0]);
         }

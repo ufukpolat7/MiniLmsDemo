@@ -1,4 +1,4 @@
-﻿using MiniLms.Interfaces;
+using MiniLms.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -148,14 +148,30 @@ namespace MiniLms.Services
             return SearchSimilarTextsAsync(collectionName, queryVector, limit);
         }
 
-        public Task<bool> DeleteVectorAsync(string collectionName, List<long> pointIds)
+        public async Task<bool> DeleteVectorAsync(string collectionName, List<long> pointIds)
         {
-            throw new NotImplementedException();
+            try
+            {
+                if (pointIds == null || pointIds.Count == 0) return true;
+
+                string url = $"{QdrantBaseUrl}/collections/{collectionName}/points/delete";
+                var payload = new { points = pointIds };
+
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(url, content);
+
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Qdrant vektör silme işlemi sırasında hata oluştu.");
+                return true; // Qdrant kapalı olsa dahi veritabanı doküman silmesini engelleme
+            }
         }
 
-        public Task<bool> DeleteVectorAsync(List<long> pointIds)
+        public async Task<bool> DeleteVectorAsync(List<long> pointIds)
         {
-            throw new NotImplementedException();
+            return await DeleteVectorAsync("lesson_contents", pointIds);
         }
     }
 }
