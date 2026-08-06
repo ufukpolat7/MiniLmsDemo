@@ -2,50 +2,155 @@
 
 @{
     ViewData["Title"] = "Özel Ders Özetlerim";
+    var groupedSummaries = Model != null && Model.Any()
+        ? Model.GroupBy(s => new {
+            CourseId = s.CourseId,
+            CourseTitle = s.Course?.Title ?? "Bilinmeyen Ders",
+            CourseCode = s.Course?.CourseCode ?? "DERS"
+          }).ToList()
+        : null;
 }
 
-<div class="container mt-4">
+<div class="container mt-4 mb-5">
+    <!-- 🎯 BAŞLIK PANERLİ -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h3 class="fw-bold text-primary mb-1"><i class="bi bi-bookmark-star-fill text-warning"></i> Özel Ders Özetlerim</h3>
-            <p class="text-muted small mb-0">Tüm dersler için yapay zekayla çıkardığınız kişisel ders özetleriniz ve çalışma notlarınız.</p>
+            <h3 class="fw-bold text-primary mb-1">
+                <i class="bi bi-bookmark-star-fill text-warning"></i> Özel Ders Özetlerim
+            </h3>
+            <p class="text-muted small mb-0">Tüm dersleriniz için kümelenmiş yapay zeka özetleri ve sesli çalışma notlarınız.</p>
         </div>
-        <span class="badge bg-primary fs-6 px-3 py-2">Toplam @Model.Count() Özet</span>
+        <span class="badge bg-primary fs-6 px-3 py-2 shadow-sm">Toplam @(Model?.Count() ?? 0) PDF Özeti Kayıtlı</span>
     </div>
 
-    @if (Model != null && Model.Any())
+    <!-- 🔊 SESLİ ÖZET ÇALAR PANELİ (STICKY PLAYER) -->
+    <div id="audioPlayerContainer" class="card shadow-sm border-primary mb-4 d-none bg-light">
+        <div class="card-body p-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
+                <div class="d-flex align-items-center gap-2">
+                    <!-- ⏪ 10 sn Geri -->
+                    <button type="button" id="btnRewind10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye Geri Al">
+                        <i class="bi bi-arrow-counterclockwise fs-6"></i>
+                    </button>
+
+                    <!-- ▶️/⏸️ Oynat / Durdur -->
+                    <button type="button" id="btnPlayAudio" class="btn btn-sm btn-success rounded-circle shadow-sm" style="width:40px; height:40px; padding:0;" title="Oynat / Durdur">
+                        <i class="bi bi-play-fill fs-4"></i>
+                    </button>
+
+                    <!-- ⏩ 10 sn İleri -->
+                    <button type="button" id="btnForward10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye İleri Al">
+                        <i class="bi bi-arrow-clockwise fs-6"></i>
+                    </button>
+
+                    <div class="ms-1">
+                        <span id="audioStatusText" class="small fw-bold text-dark d-block mb-0">Sesli Özet Oynatıcı</span>
+                        <span id="audioSubText" class="small text-muted" style="font-size: 0.75rem;">Microsoft Edge Nöral TTS (tr-TR-EmelNeural)</span>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <span id="audioTimeCurrent" class="small fw-bold text-primary" style="font-size: 0.8rem;">00:00</span>
+                    <span class="small text-muted">/</span>
+                    <span id="audioTimeDuration" class="small text-muted" style="font-size: 0.8rem;">00:00</span>
+
+                    <label class="small text-muted mb-0 ms-2">Hız:</label>
+                    <select id="audioSpeedSelect" class="form-select form-select-sm py-0 px-2" style="width: auto; font-size: 0.8rem;">
+                        <option value="1.0">1.0x</option>
+                        <option value="1.25">1.25x</option>
+                        <option value="1.5">1.5x</option>
+                        <option value="2.0">2.0x</option>
+                    </select>
+
+                    <!-- 🔄 Yeniden Ses Üret -->
+                    <button type="button" id="btnRefreshAudioSummary" class="btn btn-sm btn-outline-warning text-dark px-2" title="Yeniden Sesli Özet Üret">
+                        <i class="bi bi-arrow-repeat"></i> Yeniden Üret
+                    </button>
+
+                    <!-- 🗑️ Sesi Sil -->
+                    <button type="button" id="btnDeleteAudioSummary" class="btn btn-sm btn-outline-danger px-2" title="Ses Kaydını Sil">
+                        <i class="bi bi-trash"></i> Sesi Sil
+                    </button>
+
+                    <a id="btnDownloadAudio" href="#" download class="btn btn-sm btn-outline-secondary d-none" title="MP3 Dosyasını İndir"><i class="bi bi-download"></i> İndir</a>
+                </div>
+            </div>
+
+            <!-- 🎚️ İlerleme Çubuğu -->
+            <div class="px-1">
+                <input type="range" id="audioSeekBar" class="form-range" min="0" max="100" value="0" step="0.1" style="cursor: pointer;" />
+            </div>
+
+            <audio id="summaryAudioPlayer" class="d-none"></audio>
+        </div>
+    </div>
+
+    @if (groupedSummaries != null && groupedSummaries.Any())
     {
-        <div class="row row-cols-1 row-cols-md-2 g-4">
-            @foreach (var summary in Model)
+        <!-- 🎯 DERSLERE GÖRE KÜMELENMİŞ AKORDEON LİSTESİ -->
+        <div class="accordion shadow-sm rounded border" id="courseSummariesAccordion">
+            @for (int i = 0; i < groupedSummaries.Count; i++)
             {
-                <div class="col" id="my-summary-card-@summary.Id">
-                    <div class="card h-100 shadow-sm border-0 bg-white hover-shadow transition">
-                        <div class="card-header bg-light border-0 py-3 d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="badge bg-primary fw-bold me-1">ID: #@summary.Id</span>
-                                <span class="badge bg-secondary">@(summary.Course?.CourseCode ?? "DERS")</span>
+                var group = groupedSummaries[i];
+                string accordionId = $"collapse-course-{group.Key.CourseId}";
+                string headingId = $"heading-course-{group.Key.CourseId}";
+                bool isFirst = i == 0;
+
+                <div class="accordion-item border-0 mb-2 rounded shadow-xs overflow-hidden">
+                    <h2 class="accordion-header" id="@headingId">
+                        <button class="accordion-button @(isFirst ? "" : "collapsed") bg-light text-dark fw-bold py-3 px-4" type="button" data-bs-toggle="collapse" data-bs-target="#@accordionId" aria-expanded="@(isFirst ? "true" : "false")" aria-controls="@accordionId">
+                            <div class="d-flex align-items-center justify-content-between w-100 me-3">
+                                <div>
+                                    <span class="badge bg-primary me-2 px-2 py-1">@group.Key.CourseCode</span>
+                                    <span class="fs-6 text-dark fw-bold">@group.Key.CourseTitle</span>
+                                </div>
+                                <span class="badge bg-white text-primary border border-primary px-3 py-1">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i> @group.Count() PDF Özeti
+                                </span>
                             </div>
-                            <small class="text-muted" style="font-size: 11px;">⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
-                        </div>
-                        <div class="card-body">
-                            <h6 class="fw-bold text-dark mb-2 text-truncate" title="@summary.CourseDocument?.FileName">
-                                <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
-                            </h6>
-                            <p class="text-muted small mb-3">
-                                <strong>Ders:</strong> @(summary.Course?.Title ?? "Bilinmeyen Ders")
-                            </p>
-                            <div class="bg-light p-3 rounded border text-muted small" style="max-height: 100px; overflow: hidden; position: relative;">
-                                @(summary.SummaryText.Length > 200 ? summary.SummaryText.Substring(0, 200) + "..." : summary.SummaryText)
-                            </div>
-                        </div>
-                        <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
-                            <a asp-controller="Course" asp-action="Details" asp-route-id="@summary.CourseId" class="btn btn-xs btn-outline-secondary btn-sm">
-                                <i class="bi bi-box-arrow-up-right"></i> Derse Git
-                            </a>
-                            <div class="d-flex gap-1">
-                                <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName"><i class="bi bi-eye"></i> Oku</button>
-                                <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id"><i class="bi bi-pencil-square"></i> Düzenle</button>
-                                <button type="button" class="btn btn-xs btn-danger btn-sm btn-delete-card" data-id="@summary.Id"><i class="bi bi-trash"></i> Sil</button>
+                        </button>
+                    </h2>
+                    <div id="@accordionId" class="accordion-collapse collapse @(isFirst ? "show" : "")" aria-labelledby="@headingId" data-bs-parent="#courseSummariesAccordion">
+                        <div class="accordion-body bg-white p-3">
+                            <div class="row row-cols-1 row-cols-md-2 g-3">
+                                @foreach (var summary in group)
+                                {
+                                    <div class="col" id="my-summary-card-@summary.Id">
+                                        <div class="card h-100 shadow-sm border border-light rounded-3 hover-shadow transition">
+                                            <div class="card-header bg-white border-0 py-2 d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <span class="badge bg-secondary me-1" style="font-size: 10px;">ID: #@summary.Id</span>
+                                                    @if (!string.IsNullOrEmpty(summary.AudioFilePath))
+                                                    {
+                                                        <span class="badge bg-success" style="font-size: 10px;"><i class="bi bi-volume-up-fill"></i> Sesli Özet Var</span>
+                                                    }
+                                                </div>
+                                                <small class="text-muted" style="font-size: 11px;">⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
+                                            </div>
+                                            <div class="card-body py-2">
+                                                <h6 class="fw-bold text-dark mb-2 text-truncate" title="@summary.CourseDocument?.FileName">
+                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
+                                                </h6>
+                                                <div class="bg-light p-2 rounded border text-muted small" style="max-height: 80px; overflow: hidden; font-size: 0.85rem;">
+                                                    @(summary.SummaryText.Length > 160 ? summary.SummaryText.Substring(0, 160) + "..." : summary.SummaryText)
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex flex-wrap align-items-center justify-content-between gap-1">
+                                                <div>
+                                                    <!-- 🔊 SESLİ DİNLE BUTONU -->
+                                                    <button type="button" class="btn btn-xs btn-success btn-sm btn-audio-summary-card" data-courseid="@summary.CourseId" data-docid="@summary.CourseDocumentId" title="Sesli Özeti Dinle">
+                                                        <i class="bi bi-volume-up-fill"></i> Sesli Dinle
+                                                    </button>
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName" title="Özeti Gör"><i class="bi bi-eye"></i> Oku</button>
+                                                    <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
+                                                    <button type="button" class="btn btn-xs btn-danger btn-sm btn-delete-card" data-id="@summary.Id" title="Özeti Sil"><i class="bi bi-trash"></i></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
                             </div>
                         </div>
                     </div>
@@ -57,12 +162,12 @@
     {
         <div class="card shadow-sm p-5 text-center my-4">
             <div class="mb-3">
-                <i class="bi bi-journal-bookmark text-muted" style="font-size: 3rem;"></i>
+                <i class="bi bi-journal-bookmark text-muted" style="font-size: 3.5rem;"></i>
             </div>
             <h5 class="fw-bold text-secondary">Henüz Kaydedilmiş Ders Özetiniz Bulunmuyor</h5>
-            <p class="text-muted small">Kayıtlı olduğunuz derslerin detay sayfasına giderek <strong>"Özetle"</strong> butonuna tıkladığınızda özetleriniz otomatik olarak buraya kaydedilecektir.</p>
+            <p class="text-muted small">Ders detay sayfasına giderek dokümanlarınız için <strong>"Özetle"</strong> butonuna tıkladığınızda özetleriniz otomatik olarak derslere kümelenerek buraya kaydedilecektir.</p>
             <div>
-                <a asp-controller="Course" asp-action="Index" class="btn btn-primary btn-sm"><i class="bi bi-book"></i> Derslere Göz At</a>
+                <a asp-controller="Course" asp-action="Index" class="btn btn-primary btn-sm px-4"><i class="bi bi-book me-1"></i> Derslere Göz At</a>
             </div>
         </div>
     }
@@ -70,14 +175,14 @@
 
 <!-- 🎯 ÖZET OKUMA / GÖRÜNTÜLEME MODALI -->
 <div class="modal fade" id="viewSummaryModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow-lg">
             <div class="modal-header bg-primary text-white py-2">
-                <h6 class="modal-title fw-bold" id="viewSummaryModalTitle"><i class="bi bi-book-half"></i> Özet Detayı</h6>
+                <h6 class="modal-title fw-bold text-white" id="viewSummaryModalTitle"><i class="bi bi-book-half"></i> Özet Detayı</h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
             </div>
-            <div class="modal-body">
-                <div id="viewSummaryContent" class="p-3 bg-light rounded text-dark" style="max-height: 450px; overflow-y: auto; line-height: 1.6;"></div>
+            <div class="modal-body p-4">
+                <div id="viewSummaryContent" class="p-3 bg-light rounded text-dark" style="line-height: 1.65; font-size: 1.02rem;"></div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
@@ -86,9 +191,9 @@
     </div>
 </div>
 
-<!-- 🎯 ÖZET DÜZENLEME MODALI (WORD BENZERİ ZENGİN METİN EDİTÖRÜ) -->
+<!-- 🎯 ÖZET DÜZENLEME MODALI -->
 <div class="modal fade" id="editSummaryModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content shadow-lg">
             <div class="modal-header bg-warning text-white py-2">
                 <h6 class="modal-title fw-bold text-white"><i class="bi bi-file-earmark-word"></i> Özeti Düzenle</h6>
@@ -152,50 +257,200 @@
                 }
             });
 
+            // 🎯 🔊 SESLİ ÖZET DURUMU VE OYNATICI JS KODLARI
+            var audioState = { isPlaying: false };
+            var activeAudioState = { courseId: null, documentId: null };
+            var activeAudioRequestId = 0;
+
+            function stopCurrentAudioPlayback() {
+                var player = document.getElementById("summaryAudioPlayer");
+                if (player) {
+                    try {
+                        player.pause();
+                        player.currentTime = 0;
+                        player.removeAttribute("src");
+                        player.load();
+                    } catch (e) { }
+                }
+                if ('speechSynthesis' in window) {
+                    try { window.speechSynthesis.cancel(); } catch (e) { }
+                }
+                audioState.isPlaying = false;
+                $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>').prop("disabled", false);
+                $("#audioTimeCurrent").text("00:00");
+                $("#audioTimeDuration").text("00:00");
+                $("#audioSeekBar").val(0);
+            }
+
+            function triggerAudioSummary(courseId, docId, forceRefresh) {
+                if (!docId || !courseId) return;
+
+                stopCurrentAudioPlayback();
+                var thisRequestId = ++activeAudioRequestId;
+
+                activeAudioState.courseId = courseId;
+                activeAudioState.documentId = docId;
+
+                var playerContainer = $("#audioPlayerContainer");
+                playerContainer.removeClass("d-none");
+                $('html, body').animate({ scrollTop: playerContainer.offset().top - 100 }, 300);
+
+                $("#audioStatusText").text(forceRefresh ? "Yeni Sesli Özet Üretiliyor..." : "Sesli Özet Yükleniyor...");
+                $("#audioSubText").text(forceRefresh ? "Edge Nöral Seslendirmesi Yapılıyor..." : "Önbellekten veya Ses Servisinden Çekiliyor");
+                $("#btnPlayAudio").html('<div class="spinner-border spinner-border-sm text-light" role="status"></div>').prop("disabled", true);
+
+                $.ajax({
+                    url: '@Url.Action("GetAudioSummary", "Course")',
+                    type: 'GET',
+                    data: { courseId: courseId, documentId: docId, forceRefresh: forceRefresh === true },
+                    success: function (res) {
+                        if (thisRequestId !== activeAudioRequestId) return;
+                        $("#btnPlayAudio").prop("disabled", false);
+
+                        if (res.success && res.audioUrl) {
+                            var player = document.getElementById("summaryAudioPlayer");
+                            player.src = res.audioUrl;
+                            $("#btnDownloadAudio").attr("href", res.audioUrl).removeClass("d-none");
+                            $("#audioStatusText").text("Sesli Özet Hazır");
+                            $("#audioSubText").text(res.isCached ? "💾 Önbellekten Yüklendi (Kayıtlı Ses)" : "✨ Microsoft Edge Nöral TTS (Yeni Ses)");
+                            $("#btnPlayAudio").html('<i class="bi bi-pause-fill fs-4"></i>');
+                            
+                            var playPromise = player.play();
+                            if (playPromise !== undefined) {
+                                playPromise.then(function () {
+                                    audioState.isPlaying = true;
+                                }).catch(function (err) {
+                                    $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>');
+                                });
+                            }
+
+                            player.onended = function () {
+                                audioState.isPlaying = false;
+                                $("#btnPlayAudio").html('<i class="bi bi-play-fill fs-4"></i>');
+                            };
+                        } else {
+                            stopCurrentAudioPlayback();
+                            playerContainer.addClass("d-none");
+                            alert("⚠️ " + (res.message || "Ses kaydı alınamadı."));
+                        }
+                    },
+                    error: function () {
+                        if (thisRequestId !== activeAudioRequestId) return;
+                        stopCurrentAudioPlayback();
+                        playerContainer.addClass("d-none");
+                        alert("Sesli özet servisine bağlanırken sunucu hatası oluştu.");
+                    }
+                });
+            }
+
+            $(document).on("click", ".btn-audio-summary-card", function () {
+                var courseId = $(this).data("courseid");
+                var docId = $(this).data("docid");
+                triggerAudioSummary(courseId, docId, false);
+            });
+
+            // 🔄 Yeniden Ses Üret
+            $("#btnRefreshAudioSummary").click(function () {
+                if (activeAudioState.courseId && activeAudioState.documentId) {
+                    if (confirm("Bu dokümanın sesli özetini yeniden ürettirmek istediğinizden emin misiniz?")) {
+                        triggerAudioSummary(activeAudioState.courseId, activeAudioState.documentId, true);
+                    }
+                }
+            });
+
+            // 🗑️ Sesi Sil
+            $("#btnDeleteAudioSummary").click(function () {
+                if (activeAudioState.courseId && activeAudioState.documentId) {
+                    if (confirm("Bu dokümana ait ses kaydını silmek istediğinize emin misiniz?")) {
+                        stopCurrentAudioPlayback();
+                        $("#audioPlayerContainer").addClass("d-none");
+
+                        $.post('@Url.Action("DeleteAudioSummary", "Course")', { 
+                            courseId: activeAudioState.courseId, 
+                            documentId: activeAudioState.documentId 
+                        }, function (res) {
+                            if (res.success) {
+                                alert("✅ " + res.message);
+                                location.reload();
+                            } else {
+                                alert("⚠️ " + res.message);
+                            }
+                        });
+                    }
+                }
+            });
+
+            // 🎚️ Saniye Sayacı ve Slider Kontrolleri
+            function formatAudioTime(seconds) {
+                if (isNaN(seconds) || seconds < 0) return "00:00";
+                var mins = Math.floor(seconds / 60);
+                var secs = Math.floor(seconds % 60);
+                return (mins < 10 ? "0" + mins : mins) + ":" + (secs < 10 ? "0" + secs : secs);
+            }
+
+            var playerElement = document.getElementById("summaryAudioPlayer");
+            if (playerElement) {
+                playerElement.ontimeupdate = function () {
+                    if (playerElement.duration) {
+                        var percent = (playerElement.currentTime / playerElement.duration) * 100;
+                        $("#audioSeekBar").val(percent);
+                        $("#audioTimeCurrent").text(formatAudioTime(playerElement.currentTime));
+                    }
+                };
+
+                playerElement.onloadedmetadata = function () {
+                    $("#audioTimeDuration").text(formatAudioTime(playerElement.duration));
+                };
+            }
+
+            $("#audioSeekBar").on("input change", function () {
+                if (playerElement && playerElement.duration) {
+                    var seekTo = ($(this).val() / 100) * playerElement.duration;
+                    playerElement.currentTime = seekTo;
+                }
+            });
+
+            $("#btnRewind10").click(function () {
+                if (playerElement && playerElement.src) {
+                    playerElement.currentTime = Math.max(0, playerElement.currentTime - 10);
+                }
+            });
+
+            $("#btnForward10").click(function () {
+                if (playerElement && playerElement.src) {
+                    playerElement.currentTime = Math.min(playerElement.duration || 0, playerElement.currentTime + 10);
+                }
+            });
+
+            $("#btnPlayAudio").click(function () {
+                if (playerElement && playerElement.src) {
+                    if (playerElement.paused) {
+                        playerElement.play();
+                        $(this).html('<i class="bi bi-pause-fill fs-4"></i>');
+                    } else {
+                        playerElement.pause();
+                        $(this).html('<i class="bi bi-play-fill fs-4"></i>');
+                    }
+                }
+            });
+
+            $("#audioSpeedSelect").change(function () {
+                var speed = parseFloat($(this).val());
+                if (playerElement) {
+                    playerElement.playbackRate = speed;
+                }
+            });
+
+            // 🎯 METİN ÖZETİ GÖRÜNTÜLEME VE DÜZENLEME
             function formatAiResponseToHtml(rawText) {
                 if (!rawText) return "";
-                if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1 || rawText.indexOf("<ul>") !== -1 || rawText.indexOf("<ol>") !== -1 || rawText.indexOf("<em>") !== -1 || rawText.indexOf("<u>") !== -1) {
+                if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1) {
                     return rawText;
                 }
                 var text = rawText;
-                text = text.replace(/Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?/gi, '');
-                text = text.replace(/Zafer\s+Cömert/gi, '');
-                text = text.replace(/BTK\s+Akademi/gi, '');
-                text = text.replace(/(\b\d+\s+){3,}\.?(\s*\d+)*/g, ' ');
-                text = text.replace(/\r\n/g, '\n');
-
-                text = text.replace(/([.!\?)]|\d)\s+([0-9]*\s*[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğıöşü\s\(\)]+:\s*)/g, '$1\n\n**$2**');
-                text = text.replace(/([.!\?)]|\d)\s+(\*\*[^*]+\*\*)/g, '$1\n\n$2');
-
-                text = text.replace(/^[•\-]\s*/gm, '');
-                text = text.replace(/^-{2,}\s*$/gm, '');
-
-                text = text.replace(/\$+([^$]+)\$+/g, '<code>$1</code>');
-
-                text = text.replace(/^(?:#\s*|\*\*)?([A-ZÇĞİÖŞÜ0-9\s\-]+DERS REHBERİ[A-ZÇĞİÖŞÜ0-9\s\-]*)(?:\*\*)?$/gm, function(match, title) {
-                    return '<h2 style="color: #0066ff; font-weight: 800; font-size: 1.35rem; margin-top: 1rem; margin-bottom: 0.8rem; text-transform: uppercase; line-height: 1.3;">' + title.trim() + '</h2>';
-                });
-
-                text = text.replace(/^(?:##\s*|###\s*|\*\*)?(\d+\.?[0-9\.]*\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|[A-Z]\.\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|SINAV İÇİN[A-ZÇĞİÖŞÜ\s\-]+)(?:\*\*)?$/gm, function(match, header) {
-                    return '<h3 style="color: #0066ff; font-weight: 700; font-size: 1.18rem; margin-top: 1.4rem; margin-bottom: 0.6rem; line-height: 1.35;">' + header.trim() + '</h3>';
-                });
-
-                text = text.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight: 700; color: #000000;">$1</strong>');
-                text = text.replace(/\*([^*]+)\*/g, '<em style="color: #334155; font-style: italic;">$1</em>');
-
-                var lines = text.split(/\n\n+/);
-                var html = "";
-                for (var i = 0; i < lines.length; i++) {
-                    var line = lines[i].trim();
-                    if (!line) continue;
-                    if (line.startsWith('<h2') || line.startsWith('<h3')) {
-                        html += line;
-                    } else {
-                        html += '<p style="color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 1rem;">' + line.replace(/\n/g, '<br/>') + '</p>';
-                    }
-                }
-
-                return html || '<p style="color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 1rem;">' + text + '</p>';
+                text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                text = text.replace(/\n\n+/g, '</p><p>');
+                return '<p>' + text + '</p>';
             }
 
             $(".btn-view-modal").click(function () {
@@ -249,6 +504,7 @@
                         if (res.success) {
                             $("#my-summary-card-" + summaryId).fadeOut(300, function () { $(this).remove(); });
                             alert("Özet silindi.");
+                            location.reload();
                         } else {
                             alert("Hata: " + res.message);
                         }
