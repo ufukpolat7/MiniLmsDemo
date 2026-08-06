@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using MiniLms.Data;
@@ -133,7 +133,7 @@ namespace MiniLms.Services
             }
         }
 
-        public async Task<List<string>> GetDocumentTextChunksAsync(int documentId, int maxChunks = 5)
+        public async Task<List<string>> GetDocumentTextChunksAsync(int documentId, int maxChunks = 50)
         {
             var document = await _context.CourseDocuments.FindAsync(documentId);
             if (document == null)
@@ -141,40 +141,30 @@ namespace MiniLms.Services
                 return new List<string>();
             }
 
+            // 🎯 1. Önce doğrudan fiziksel PDF veya TXT dosyasından tam doküman metnini oku
+            string fullExtractedText = await ReadDocumentTextAsync(document);
+            if (!string.IsNullOrWhiteSpace(fullExtractedText))
+            {
+                var chunks = SplitText(fullExtractedText, 2500)
+                    .Take(maxChunks)
+                    .ToList();
+
+                if (chunks.Count > 0)
+                {
+                    return chunks;
+                }
+            }
+
+            // 🎯 2. Fiziksel dosya okunamazsa veritabanındaki indeksli parçaları kullan (DocumentTopic hariç)
             var indexedChunks = await _context.LessonContents
-                .Where(content => content.ResourceUrl == document.FilePath)
+                .Where(content => content.ResourceUrl == document.FilePath && content.Type != "DocumentTopic")
                 .OrderBy(content => content.Order)
                 .Select(content => !string.IsNullOrWhiteSpace(content.Body) ? content.Body : content.Text)
                 .Where(text => !string.IsNullOrWhiteSpace(text))
                 .Take(maxChunks)
                 .ToListAsync();
 
-            if (indexedChunks.Count > 0)
-            {
-                return indexedChunks;
-            }
-
-            string physicalPath = Path.Combine(_webHostEnvironment.WebRootPath, document.FilePath.TrimStart('/'));
-            if (!File.Exists(physicalPath))
-            {
-                return new List<string>();
-            }
-
-            string extension = Path.GetExtension(physicalPath).ToLowerInvariant();
-            string extractedText = extension == ".pdf"
-                ? ExtractTextFromPdf(physicalPath)
-                : extension == ".txt"
-                    ? await File.ReadAllTextAsync(physicalPath)
-                    : string.Empty;
-
-            if (string.IsNullOrWhiteSpace(extractedText))
-            {
-                return new List<string>();
-            }
-
-            return SplitText(extractedText, 3000)
-                .Take(maxChunks)
-                .ToList();
+            return indexedChunks;
         }
 
         public async Task EnsureDocumentTopicLessonsAsync(int courseId)
@@ -349,18 +339,26 @@ namespace MiniLms.Services
 
         private async Task<string> ReadDocumentTextAsync(CourseDocument document)
         {
-            string physicalPath = Path.Combine(_webHostEnvironment.WebRootPath, document.FilePath.TrimStart('/'));
-            if (!File.Exists(physicalPath))
+            try
             {
+                string physicalPath = Path.Combine(_webHostEnvironment.WebRootPath, document.FilePath.TrimStart('/'));
+                if (!File.Exists(physicalPath))
+                {
+                    return string.Empty;
+                }
+
+                string extension = Path.GetExtension(physicalPath).ToLowerInvariant();
+                return extension == ".pdf"
+                    ? ExtractTextFromPdf(physicalPath)
+                    : extension == ".txt"
+                        ? await File.ReadAllTextAsync(physicalPath)
+                        : string.Empty;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ReadDocumentText Hata]: Doküman okunamadı ({document.FileName}): {ex.Message}");
                 return string.Empty;
             }
-
-            string extension = Path.GetExtension(physicalPath).ToLowerInvariant();
-            return extension == ".pdf"
-                ? ExtractTextFromPdf(physicalPath)
-                : extension == ".txt"
-                    ? await File.ReadAllTextAsync(physicalPath)
-                    : string.Empty;
         }
 
         private static List<string> ExtractTopicHeadings(string text, string fileName)

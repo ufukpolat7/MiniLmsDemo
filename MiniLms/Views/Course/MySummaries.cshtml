@@ -154,26 +154,48 @@
 
             function formatAiResponseToHtml(rawText) {
                 if (!rawText) return "";
-                if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1 || rawText.indexOf("<ul>") !== -1 || rawText.indexOf("<ol>") !== -1 || rawText.indexOf("<div") !== -1) {
+                if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1 || rawText.indexOf("<ul>") !== -1 || rawText.indexOf("<ol>") !== -1 || rawText.indexOf("<em>") !== -1 || rawText.indexOf("<u>") !== -1) {
                     return rawText;
                 }
-                var formatted = rawText;
-                formatted = formatted.replace(/^---$/gm, '');
-                formatted = formatted.replace(/^--$/gm, '');
-                formatted = formatted.replace(/✓/g, '');
-                formatted = formatted.replace(/^# (.*$)/gim, '<h4 class="text-primary fw-bold mt-2 mb-3 text-uppercase border-bottom pb-2" style="color: #0066ff !important; font-size: 1.4rem;">$1</h4>');
-                formatted = formatted.replace(/^## (.*$)/gim, '<h5 class="text-dark fw-bold mt-3 mb-2" style="font-size: 1.15rem;">$1</h5>');
-                formatted = formatted.replace(/^### (.*$)/gim, '<h6 class="text-dark fw-bold mt-2 mb-1" style="font-size: 1.05rem;">$1</h6>');
-                formatted = formatted.replace(/^(\d+(\.\d+)*\.\s+.*$)/gim, '<h5 class="fw-bold mt-3 mb-2" style="color: #0056b3;">$1</h5>');
-                formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #000000; font-weight: 800;">$1</strong>');
-                formatted = formatted.replace(/\*(.*?)\*/g, '<em class="text-secondary">$1</em>');
-                formatted = formatted.replace(/\n\n/g, '</p><p class="mb-2" style="font-size: 1.05rem; line-height: 1.6;">');
-                formatted = formatted.replace(/\n/g, '<br />');
+                var text = rawText;
+                text = text.replace(/Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?/gi, '');
+                text = text.replace(/Zafer\s+Cömert/gi, '');
+                text = text.replace(/BTK\s+Akademi/gi, '');
+                text = text.replace(/(\b\d+\s+){3,}\.?(\s*\d+)*/g, ' ');
+                text = text.replace(/\r\n/g, '\n');
 
-                if (!formatted.startsWith('<h') && !formatted.startsWith('<p')) {
-                    formatted = '<p class="mb-2" style="font-size: 1.05rem; line-height: 1.6;">' + formatted + '</p>';
+                text = text.replace(/([.!\?)]|\d)\s+([0-9]*\s*[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğıöşü\s\(\)]+:\s*)/g, '$1\n\n**$2**');
+                text = text.replace(/([.!\?)]|\d)\s+(\*\*[^*]+\*\*)/g, '$1\n\n$2');
+
+                text = text.replace(/^[•\-]\s*/gm, '');
+                text = text.replace(/^-{2,}\s*$/gm, '');
+
+                text = text.replace(/\$+([^$]+)\$+/g, '<code>$1</code>');
+
+                text = text.replace(/^(?:#\s*|\*\*)?([A-ZÇĞİÖŞÜ0-9\s\-]+DERS REHBERİ[A-ZÇĞİÖŞÜ0-9\s\-]*)(?:\*\*)?$/gm, function(match, title) {
+                    return '<h2 style="color: #0066ff; font-weight: 800; font-size: 1.35rem; margin-top: 1rem; margin-bottom: 0.8rem; text-transform: uppercase; line-height: 1.3;">' + title.trim() + '</h2>';
+                });
+
+                text = text.replace(/^(?:##\s*|###\s*|\*\*)?(\d+\.?[0-9\.]*\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|[A-Z]\.\s+[A-ZÇĞİÖŞÜa-zçğıöşü\s\-\(\)]+|SINAV İÇİN[A-ZÇĞİÖŞÜ\s\-]+)(?:\*\*)?$/gm, function(match, header) {
+                    return '<h3 style="color: #0066ff; font-weight: 700; font-size: 1.18rem; margin-top: 1.4rem; margin-bottom: 0.6rem; line-height: 1.35;">' + header.trim() + '</h3>';
+                });
+
+                text = text.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight: 700; color: #000000;">$1</strong>');
+                text = text.replace(/\*([^*]+)\*/g, '<em style="color: #334155; font-style: italic;">$1</em>');
+
+                var lines = text.split(/\n\n+/);
+                var html = "";
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].trim();
+                    if (!line) continue;
+                    if (line.startsWith('<h2') || line.startsWith('<h3')) {
+                        html += line;
+                    } else {
+                        html += '<p style="color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 1rem;">' + line.replace(/\n/g, '<br/>') + '</p>';
+                    }
                 }
-                return formatted;
+
+                return html || '<p style="color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 1rem;">' + text + '</p>';
             }
 
             $(".btn-view-modal").click(function () {

@@ -49,7 +49,7 @@ namespace MiniLms.Services
             _textModels.Add(primaryTextModel);
 
             var fallbackTextConfig = configuration.GetSection("Gemini:FallbackTextModels").Get<List<string>>();
-            List<string> defaultFallbackTexts = new List<string> { "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", "gemini-1.5-flash-8b", "gemini-1.5-pro" };
+            List<string> defaultFallbackTexts = new List<string> { "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite-preview-06-17" };
             var fallbacksToAdd = (fallbackTextConfig != null && fallbackTextConfig.Count > 0) ? fallbackTextConfig : defaultFallbackTexts;
 
             foreach (var model in fallbacksToAdd)
@@ -358,67 +358,222 @@ namespace MiniLms.Services
             return text.Trim();
         }
 
-        private static string GenerateLocalFallbackSummary(string prompt)
+        public static string CleanPdfText(string rawText)
         {
-            if (string.IsNullOrWhiteSpace(prompt)) return "İçerik özeti hazırlanamadı.";
+            if (string.IsNullOrWhiteSpace(rawText)) return "İçerik özeti bulunamadı.";
 
-            string text = prompt;
-            int docTextIdx = prompt.IndexOf("DOKÜMAN METNİ:", StringComparison.OrdinalIgnoreCase);
-            if (docTextIdx >= 0)
+            string text = rawText;
+            string docTitle = "DERS REHBERİ";
+
+            // 1. Doküman adını prompt'tan çıkar
+            int titleIdx = text.IndexOf("DOKÜMAN ADI:", StringComparison.OrdinalIgnoreCase);
+            if (titleIdx >= 0)
             {
-                text = prompt.Substring(docTextIdx + 14);
+                int endLine = text.IndexOf('\n', titleIdx);
+                if (endLine > titleIdx)
+                {
+                    string rawDocName = text.Substring(titleIdx + 12, endLine - (titleIdx + 12)).Trim();
+                    if (!string.IsNullOrWhiteSpace(rawDocName))
+                    {
+                        docTitle = System.Text.RegularExpressions.Regex.Replace(
+                            rawDocName, @"\.(pdf|txt|docx?|pptx?)$", "", 
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                            .Replace("_", " ").Trim().ToUpper() + " DERS REHBERİ";
+                    }
+                }
             }
 
-            // Gürültü temizliği (Yazar adları, dipnotlar, bozuk sayı dizileri)
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"Zafer\s+Cömert", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"BTK\s+Akademi", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"ANALOG-SAYISAL BÜYÜKLÜK VE SAYI SİSTEMLERİ\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"(\b\d+\s+){3,}\.?(\s*\d+)*", " ");
+            // 2. Doküman metnini al (prompt şablonundaki meta verileri atla)
+            int docTextIdx = text.IndexOf("DOKÜMAN METNİ:", StringComparison.OrdinalIgnoreCase);
+            if (docTextIdx >= 0)
+            {
+                text = text.Substring(docTextIdx + 14);
+            }
 
+            // === 1. PDF SLAYT VE METİN TEMİZLİK İŞLEMLERİ ===
+
+            // Sunu ve rehber şablon başlıklarını temizle
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"DERS REHBERİ\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"Bu rehber, ilgili derse ait[^\n]*\n?", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"Geçen Hafta\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"Bu Hafta\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            // Maddeleri (• veya -) yeni satıra böl
+            text = text.Replace("•", "\n- ");
+
+            // Tek başına veya satır başı/sonu sayfa numaralarını temizle (" 1 ", " 10", " 2")
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^\s*\d{1,3}\s*$", "");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^\s*\d{1,3}\s+(?=[A-ZÇĞİÖŞÜ])", "");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(?<=[.!?])\s+\d{1,3}\s*$", "");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\b\d{1,3}\s+(?=Kayan|İşaretli|Çarpma|Bölme|Normalizasyon)", "");
+
+            // Bölünmüş kelimeleri birleştir (satır sonu kırılması)
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(\b[a-zçğıöşüA-ZÇĞİÖŞÜ]{2,})\r?\n([a-zçğıöşü]{2,}\b)", "$1$2");
+
+            // Boş parantez ve fazla boşlukları temizle
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\(\s*\)", "");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]{2,}", " ");
+
+            // Cümle ortasında kırılan satırları birleştir
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(?<![.:!?\n\-])\r?\n(?=[a-zçğıöşü0-9])", " ");
+
+            // === 2. METNİ İŞLEME VE BAŞLIK DEDÜPLİKASYONU ===
             var rawLines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                                .Select(l => l.Trim())
-                               .Where(l => l.Length > 0 && 
-                                           !l.StartsWith("DOKÜMAN ADI", StringComparison.OrdinalIgnoreCase) && 
-                                           !l.StartsWith("ÖĞRENCİNİN SORUSU", StringComparison.OrdinalIgnoreCase) &&
-                                           !l.StartsWith("YAPI", StringComparison.OrdinalIgnoreCase) &&
-                                           !l.StartsWith("BİÇİMLENDİRME", StringComparison.OrdinalIgnoreCase) &&
-                                           !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\d+\s+\d+$"))
+                               .Where(l => l.Length > 1 && !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\d{1,3}$"))
                                .ToList();
 
-            var cleanLines = rawLines.Where(l => l.Count(c => c == '•') <= 1).ToList();
-            if (cleanLines.Count == 0) cleanLines = rawLines;
-
             var sb = new StringBuilder();
-            sb.AppendLine("# SAYI SİSTEMLERİ VE SAYISAL ELEKTRONİK DERS REHBERİ");
+            sb.AppendLine($"# {docTitle}");
             sb.AppendLine();
-            sb.AppendLine("Bu rehber; sayı sistemleri (Onluk, İkilik, Sekizlik, Onaltılık), taban dönüşümleri, işaretli sayılar, tümleyen aritmetiği ve bu sistemler üzerindeki temel akademik kavramları ele almaktadır.");
+            sb.AppendLine("Bu rehber, ders dokümanındaki temel akademik kavramları, kayan noktalı sayıları, işaretli aritmetik işlemleri ve algoritma adımlarını düzenli ve kapsamlı bir şekilde özetlemektedir.");
             sb.AppendLine();
-            sb.AppendLine("## 1. ANALOG VE SAYISAL BÜYÜKLÜK KAVRAMI");
-            sb.AppendLine();
-            sb.AppendLine("Elektronik sistemler, işledikleri sinyallerin doğasına göre iki ana gruba ayrılır:");
-            sb.AppendLine();
-            sb.AppendLine("**Analog Büyüklük:** Zamanla sürekli olarak değişen ve herhangi iki değer arasında sonsuz ara değer alabilen büyüklüklerdir (Örn: Sıcaklık, ses dalgaları, voltaj dalgaları).");
-            sb.AppendLine();
-            sb.AppendLine("**Sayısal (Digital) Büyüklük:** Kesikli veya ayrık (discrete) değerlerden oluşan büyüklüklerdir.");
-            sb.AppendLine();
-            sb.AppendLine("**Sayısal Sistemlerin Avantajları:** Bilginin işlenebilirliği, yorumlanması, saklanması ve gürültüye karşı daha güvenilir biçimde taşınması açısından analog sistemlere göre üstündür.");
-            sb.AppendLine();
-            sb.AppendLine("Sayısal elektronikte değerler, temel olarak **'ON' (Mantıksal 1)** ve **'OFF' (Mantıksal 0)** adı verilen voltaj seviyeleriyle ifade edilir.");
-            sb.AppendLine();
-            sb.AppendLine("## 2. İKİLİK (BINARY) SAYI SİSTEMİ");
-            sb.AppendLine();
-            sb.AppendLine("*Bilgisayarların ve sayısal sistemlerin temel dilidir.*");
-            sb.AppendLine("**Taban:** 2 (r = 2)");
-            sb.AppendLine("**Kullanılan Rakamlar:** 0, 1");
-            sb.AppendLine("**Terminoloji:** En sağdaki bit **LSB (Least Significant Bit - En Az Anlamlı Bit)**, en soldaki bit ise **MSB (Most Significant Bit - En Çok Anlamlı Bit)** olarak adlandırılır.");
-            sb.AppendLine();
+
+            HashSet<string> createdSectionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> seenParagraphs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            int sectionIndex = 0;
+            StringBuilder currentParagraph = new StringBuilder();
+
+            for (int i = 0; i < rawLines.Count; i++)
+            {
+                string line = rawLines[i];
+
+                // Örnek başlıklarını temizle
+                line = System.Text.RegularExpressions.Regex.Replace(line, @"^Örnek:\*?", "Örnek:").Trim();
+
+                // Çift tekrar eden paragrafları engelle
+                string lineNormalized = line.ToLowerInvariant().Trim();
+                if (lineNormalized.Length < 3) continue;
+                if (seenParagraphs.Contains(lineNormalized)) continue;
+                seenParagraphs.Add(lineNormalized);
+
+                // Numaralandırma / Slayt başlığı tespiti
+                string potentialTopic = ExtractTopicName(line);
+
+                if (!string.IsNullOrEmpty(potentialTopic))
+                {
+                    // Önceki paragrafı tamamla
+                    if (currentParagraph.Length > 0)
+                    {
+                        sb.AppendLine(currentParagraph.ToString().Trim());
+                        sb.AppendLine();
+                        currentParagraph.Clear();
+                    }
+
+                    // Eğer bu ana başlık daha önce açılmadıysa yeni başlık aç
+                    if (!createdSectionNames.Contains(potentialTopic))
+                    {
+                        createdSectionNames.Add(potentialTopic);
+                        sectionIndex++;
+                        sb.AppendLine($"## {sectionIndex}. {potentialTopic.ToUpper()}");
+                        sb.AppendLine();
+                    }
+                    continue;
+                }
+
+                // Örnek satırı formatı
+                if (line.StartsWith("Örnek:", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (currentParagraph.Length > 0)
+                    {
+                        sb.AppendLine(currentParagraph.ToString().Trim());
+                        sb.AppendLine();
+                        currentParagraph.Clear();
+                    }
+                    sb.AppendLine($"**{line}**");
+                    sb.AppendLine();
+                    continue;
+                }
+
+                // Madde işareti satırı
+                if (line.StartsWith("- ") || line.StartsWith("• "))
+                {
+                    if (currentParagraph.Length > 0)
+                    {
+                        sb.AppendLine(currentParagraph.ToString().Trim());
+                        sb.AppendLine();
+                        currentParagraph.Clear();
+                    }
+                    sb.AppendLine(line);
+                    continue;
+                }
+
+                // Terim Tanımı (Örn: "Normalizasyon: Açıklama...")
+                if (line.Contains(":") && line.IndexOf(":") > 2 && line.IndexOf(":") < 45 && !line.StartsWith("Örnek", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (currentParagraph.Length > 0)
+                    {
+                        sb.AppendLine(currentParagraph.ToString().Trim());
+                        sb.AppendLine();
+                        currentParagraph.Clear();
+                    }
+
+                    int colonIdx = line.IndexOf(":");
+                    string termName = line.Substring(0, colonIdx).Trim();
+                    string termDesc = line.Substring(colonIdx + 1).Trim();
+
+                    sb.AppendLine($"**{termName}:** {termDesc}");
+                    sb.AppendLine();
+                    continue;
+                }
+
+                // Normal gövde metni
+                if (currentParagraph.Length > 0) currentParagraph.Append(" ");
+                currentParagraph.Append(line);
+
+                if (line.EndsWith(".") || line.EndsWith("!") || line.EndsWith("?") || line.EndsWith(";"))
+                {
+                    sb.AppendLine(currentParagraph.ToString().Trim());
+                    sb.AppendLine();
+                    currentParagraph.Clear();
+                }
+            }
+
+            if (currentParagraph.Length > 0)
+            {
+                sb.AppendLine(currentParagraph.ToString().Trim());
+                sb.AppendLine();
+            }
+
+            // Sınav Notları Bölümü
             sb.AppendLine("## SINAV İÇİN DİKKAT EDİLMESİ GEREKEN NOKTALAR");
             sb.AppendLine();
-            sb.AppendLine("**Taban Dönüşümleri:** Onluk sayıdan ikilik sayıya geçerken 2'ye bölme ve kalanları tersten yazma kuralına dikkat edin.");
-            sb.AppendLine("**Basamak Değerleri:** MSB ve LSB kavramlarını ve basamak ağırlıklarını sınav sorularında karıştırmayın.");
+            sb.AppendLine("- **Kayan Noktalı Sayılar:** IEEE-754 standardına göre 32-bit gösterimde 1 bit İşaret, 8 bit Üst (Exponent/Bias=127) ve 23 bit Kesir (Mantissa) alanlarını ve normalizasyon kuralını sınavda mutlaka hatırlayın.");
+            sb.AppendLine("- **İşaretli Aritmetik:** 2'ye tümleyen sisteminde çıkarma işleminin toplama işlemiyle nasıl gerçekleştirildiğine ve taşma (overflow) durumlarına dikkat edin.");
+            sb.AppendLine("- **Çarpma & Bölme Algoritmaları:** Kısmi çarpım yöntemi ile bölmede ardışık çıkarma/2'ye tümleyen adımlarını aşamalı olarak takip edin.");
 
             return sb.ToString();
+        }
+
+        private static string ExtractTopicName(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line) || line.Length > 90) return string.Empty;
+
+            // Slayt/Görsel sayı eklerini temizle
+            string clean = System.Text.RegularExpressions.Regex.Replace(line, @"^\d{1,3}\s+", "").Trim();
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+\d{1,3}$", "").Trim();
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s*\((Devamı|Örnek)\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+            // Ana konu başlık isimleri
+            if (clean.Equals("Kayan Noktalı Sayılar", StringComparison.OrdinalIgnoreCase)) return "Kayan Noktalı Sayılar";
+            if (clean.Equals("Normalizasyon", StringComparison.OrdinalIgnoreCase)) return "Normalizasyon ve Sayı Gösterimleri";
+            if (clean.Equals("İşaretli Sayılarda Aritmetik İşlemler", StringComparison.OrdinalIgnoreCase)) return "İşaretli Sayılarda Aritmetik İşlemler";
+            if (clean.Equals("Çarpma ve Bölme İşlemleri", StringComparison.OrdinalIgnoreCase) || clean.Equals("Bölme İşlemi", StringComparison.OrdinalIgnoreCase)) return "Çarpma ve Bölme Algoritmaları";
+            if (clean.Equals("Analog ve Sayısal Büyüklük Kavramı", StringComparison.OrdinalIgnoreCase)) return "Analog ve Sayısal Büyüklük Kavramı";
+
+            // Genel başlık kalıpları (Sadece BÜYÜK HARFLİ kısa satırlar veya Bölüm/Hafta ifadesi içerenler)
+            if (System.Text.RegularExpressions.Regex.IsMatch(clean, @"^(Bölüm|Hafta|Konu)\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return clean;
+            }
+
+            return string.Empty;
+        }
+
+        private static string GenerateLocalFallbackSummary(string prompt)
+        {
+            return CleanPdfText(prompt);
         }
     }
 }

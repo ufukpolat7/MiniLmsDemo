@@ -357,6 +357,16 @@ namespace MiniLms.Controllers
                 }
 
                 var currentUserId = _userManager.GetUserId(User);
+                if (string.IsNullOrEmpty(currentUserId))
+                {
+                    var currentUser = await _userManager.GetUserAsync(User);
+                    currentUserId = currentUser?.Id;
+                }
+                if (string.IsNullOrEmpty(currentUserId))
+                {
+                    var firstStudent = await _dbContext.Users.FirstOrDefaultAsync();
+                    currentUserId = firstStudent?.Id ?? "";
+                }
 
                 // 🎯 1. Eğer zorunlu yenileme istenmediyse, GİRİŞ YAPAN KULLANICININ bu dokümana ait kişisel özetini getir
                 if (!forceRefresh)
@@ -383,7 +393,7 @@ namespace MiniLms.Controllers
                 }
 
                 // 🎯 2. Kayıtlı kişisel özet yoksa veya forceRefresh=true ise yeni özet üret
-                var documentTexts = await _courseDocumentService.GetDocumentTextChunksAsync(documentId, maxChunks: 4);
+                var documentTexts = await _courseDocumentService.GetDocumentTextChunksAsync(documentId, maxChunks: 50);
                 if (documentTexts.Count == 0)
                 {
                     return Json(new { success = false, response = "Bu dokümandan özet üretilecek metin çıkarılamadı." });
@@ -453,7 +463,8 @@ namespace MiniLms.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, response = $"Doküman özeti alınırken teknik bir hata oluştu: {ex.Message}" });
+                Console.WriteLine($"[DocumentSummary Hata]: {ex.Message}\n{ex.StackTrace}");
+                return Json(new { success = false, response = $"Doküman özeti üretilirken bir sorun oluştu. Lütfen dokümanın geçerli bir PDF olduğundan emin olun ve tekrar deneyin." });
             }
         }
 
@@ -719,17 +730,9 @@ Ders kaynaklarından bulunan içerik:
 
         private static string BuildLocalDocumentSummary(string fileName, List<string> documentTexts)
         {
-            string preview = string.Join(
-                "\n\n",
-                documentTexts
-                    .Where(text => !string.IsNullOrWhiteSpace(text))
-                    .Take(2)
-                    .Select(text => text.Length > 900 ? text.Substring(0, 900) + "..." : text));
-
-            return $@"{fileName} dokümanından metin çıkarıldı, ancak Gemini otomatik özet şu anda kullanılamıyor.
-
-Dokümandan kısa önizleme:
-{preview}";
+            string rawText = string.Join("\n\n", documentTexts);
+            string prompt = $"DOKÜMAN ADI: {fileName}\n\nDOKÜMAN METNİ:\n{rawText}";
+            return Services.AiService.CleanPdfText(prompt);
         }
 
         private static string BuildLocalDocumentQuiz(string fileName, List<string> documentTexts, int questionCount)
