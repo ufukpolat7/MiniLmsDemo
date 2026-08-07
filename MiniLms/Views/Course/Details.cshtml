@@ -401,9 +401,14 @@
                     <div id="quizReview" class="text-start"></div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
-                <button type="button" class="btn btn-primary" id="quizNextBtn" disabled>Sonraki</button>
+            <div class="modal-footer justify-content-between">
+                <div>
+                    <button type="button" class="btn btn-outline-danger btn-sm d-none" id="quizDeleteBtn" title="Kayıtlı Quizi Sil"><i class="bi bi-trash me-1"></i> Quizi Sil</button>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
+                    <button type="button" class="btn btn-primary" id="quizNextBtn" disabled>Sonraki</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1163,18 +1168,34 @@
         });
 
         function resetQuizModal() {
-        quizState = { questions: [], currentIndex: 0, answers: [], selectedIndex: null, documentId: quizState.documentId };
-        $("#quizModalLabel").text("Doküman Quiz");
-        $("#quizProgressText").text("Ayarları seç");
-        $("#quizProgressBar").css("width", "0%");
-        $("#quizSetup").removeClass("d-none");
-        $("#quizLoading").addClass("d-none");
-        $("#quizQuestionArea").addClass("d-none");
-        $("#quizResultArea").addClass("d-none");
-        $("#quizFeedback").addClass("d-none").empty();
-        $("#quizOptions").empty();
-        $("#quizNextBtn").prop("disabled", true).text("Sonraki").removeClass("btn-success").addClass("btn-primary");
+            quizState = { questions: [], currentIndex: 0, answers: [], selectedIndex: null, documentId: quizState.documentId };
+            $("#quizModalLabel").text("Doküman Quiz");
+            $("#quizProgressText").text("Ayarları seç");
+            $("#quizProgressBar").css("width", "0%");
+            $("#quizSetup").removeClass("d-none");
+            $("#quizLoading").addClass("d-none");
+            $("#quizQuestionArea").addClass("d-none");
+            $("#quizResultArea").addClass("d-none");
+            $("#quizFeedback").addClass("d-none").empty();
+            $("#quizOptions").empty();
+            $("#quizDeleteBtn").addClass("d-none");
+            $("#quizNextBtn").prop("disabled", true).text("Sonraki").removeClass("btn-success").addClass("btn-primary");
         }
+
+        $("#quizDeleteBtn").click(function () {
+            if (!quizState.documentId) return;
+            if (confirm("Bu dokümana ait kayıtlı quizi silmek istediğinizden emin misiniz?")) {
+                $.post('@Url.Action("DeleteQuiz", "Course")', { documentId: quizState.documentId }, function (res) {
+                    if (res.success) {
+                        alert("✅ " + res.message);
+                        $("#quizDeleteBtn").addClass("d-none");
+                        resetQuizModal();
+                    } else {
+                        alert("⚠️ " + res.message);
+                    }
+                });
+            }
+        });
 
         function loadQuiz(forceRefresh, quizId) {
             var courseId = '@Model.Id';
@@ -1204,6 +1225,9 @@
                         $("#quizModalLabel").html(escapeHtml(data.title || "Doküman Quiz") + cacheBadge);
                         if (data.sourceFileName) {
                             $("#quizProgressText").html("<span class='text-primary fw-bold'><i class='bi bi-file-earmark-pdf-fill text-danger me-1'></i> Kaynak PDF: " + escapeHtml(data.sourceFileName) + "</span>");
+                        }
+                        if (data.quizId) {
+                            $("#quizDeleteBtn").removeClass("d-none");
                         }
 
                         quizState.questions = data.questions;

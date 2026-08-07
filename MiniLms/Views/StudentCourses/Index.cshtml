@@ -49,7 +49,7 @@
                                         <a asp-controller="Course" asp-action="Details" asp-route-id="@enrollment.CourseId" class="btn btn-info text-white">
                                             <i class="bi bi-eye"></i> Detay
                                         </a>
-                                        <form asp-action="Unenroll" method="post" class="d-inline">
+                                        <form asp-action="Unenroll" method="post" class="d-inline" onsubmit="return confirm('\'@enrollment.Course?.Title\' (@enrollment.Course?.CourseCode) dersine olan kaydınızı silmek istediğinizden emin misiniz?');">
                                             <input type="hidden" name="courseId" value="@enrollment.CourseId" />
                                             <button type="submit" class="btn btn-danger">
                                                 <i class="bi bi-x-circle"></i> Kaydı Sil

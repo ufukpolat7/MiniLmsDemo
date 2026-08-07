@@ -901,6 +901,47 @@ namespace MiniLms.Controllers
             }
         }
 
+        // 🎯 Kaydedilmiş Quizi Silme Endpoint'i (ID veya DocumentId ile)
+        [HttpPost]
+        public async Task<IActionResult> DeleteQuiz(int? quizId, int? documentId)
+        {
+            try
+            {
+                var userId = _userManager.GetUserId(User);
+
+                SavedQuiz? quiz = null;
+
+                if (quizId.HasValue && quizId.Value > 0)
+                {
+                    quiz = await _dbContext.SavedQuizzes.FirstOrDefaultAsync(q => q.Id == quizId.Value && q.UserId == userId);
+                }
+                
+                if (quiz == null && documentId.HasValue && documentId.Value > 0)
+                {
+                    quiz = await _dbContext.SavedQuizzes.FirstOrDefaultAsync(q => q.CourseDocumentId == documentId.Value && q.UserId == userId);
+                }
+
+                if (quiz == null && quizId.HasValue)
+                {
+                    quiz = await _dbContext.SavedQuizzes.FindAsync(quizId.Value);
+                }
+
+                if (quiz == null)
+                {
+                    return Json(new { success = false, message = "Silinecek quiz bulunamadı veya daha önce silinmiş." });
+                }
+
+                _dbContext.SavedQuizzes.Remove(quiz);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, quizId = quiz.Id, message = "Quiz başarıyla silindi." });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Quiz silinirken hata oluştu: {ex.Message}" });
+            }
+        }
+
         private static bool IsAiServiceError(string response)
         {
             return response.Contains("Gemini API", StringComparison.OrdinalIgnoreCase) ||

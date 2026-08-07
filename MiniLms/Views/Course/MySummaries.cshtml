@@ -589,14 +589,23 @@
             // 🎯 KAYDEDİLMİŞ QUIZI SİL
             $(document).on("click", ".btn-delete-quiz", function () {
                 var quizId = $(this).data("quizid");
-                if (confirm("Quiz #" + quizId + " numaralı quizi silmek istediğinize emin misiniz?")) {
-                    $.post('@Url.Action("DeleteQuiz", "Course")', { quizId: quizId }, function (res) {
-                        if (res.success) {
-                            $("#my-quiz-card-" + quizId).fadeOut(300, function () { $(this).remove(); });
-                            alert("✅ " + res.message);
-                            location.reload();
-                        } else {
-                            alert("⚠️ " + res.message);
+                var docId = $(this).data("docid");
+                if (confirm("Quiz #" + quizId + " numaralı quizi kalıcı olarak silmek istediğinize emin misiniz?")) {
+                    $.ajax({
+                        url: '@Url.Action("DeleteQuiz", "Course")',
+                        type: 'POST',
+                        data: { quizId: quizId, documentId: docId },
+                        success: function (res) {
+                            if (res.success) {
+                                $("#my-quiz-card-" + quizId).fadeOut(300, function () { $(this).remove(); });
+                                alert("✅ " + res.message);
+                                location.reload();
+                            } else {
+                                alert("⚠️ " + (res.message || "Quiz silinemedi."));
+                            }
+                        },
+                        error: function (xhr, status, error) {
+                            alert("⚠️ Quiz silinirken sunucu hatası oluştu: " + error);
                         }
                     });
                 }
