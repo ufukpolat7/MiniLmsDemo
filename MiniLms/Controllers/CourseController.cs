@@ -526,8 +526,11 @@ namespace MiniLms.Controllers
 
                 string textSummary = existingSummary.SummaryText;
 
-                // 🎯 4. Azure Speech ile ses dosyasını üret
-                string? audioUrl = await _azureSpeechService.GenerateAudioSummaryAsync(textSummary, documentId, currentUserId ?? "guest");
+                // 🎯 4. Sesli Özet İçin Konuşma Diline Dönüştürülmüş Akıcı Metin Üret (Hiçbir selamlama / giriş cümlesi olmadan direkt konuya giren)
+                string conversationalText = await BuildConversationalSpeechTextAsync(textSummary);
+
+                // 🎯 5. Microsoft Edge Free Nöral TTS / Azure Speech ile ses dosyasını üret
+                string? audioUrl = await _azureSpeechService.GenerateAudioSummaryAsync(conversationalText, documentId, currentUserId ?? "guest");
 
                 existingSummary.AudioFilePath = audioUrl;
                 _dbContext.DocumentSummaries.Update(existingSummary);
@@ -546,6 +549,43 @@ namespace MiniLms.Controllers
                 Console.WriteLine($"[GetAudioSummary Hata]: {ex.Message}\n{ex.StackTrace}");
                 return Json(new { success = false, message = $"Sesli özet üretilirken bir sorun oluştu: {ex.Message}" });
             }
+        }
+
+        private async Task<string> BuildConversationalSpeechTextAsync(string rawSummaryText)
+        {
+            if (string.IsNullOrWhiteSpace(rawSummaryText)) return string.Empty;
+
+            string prompt = $@"
+Aşağıdaki ders özet metnini doğal, akıcı ve samimi bir TÜRKÇE SESLİ ANLATIM METNİNE dönüştür.
+
+KESİN VE ZORUNLU KURALLAR:
+1. 'Merhaba', 'Selam', 'Selamlar', 'Hoş geldiniz', 'Bugün bu derste...', 'Merhaba bugün şunu yapacağız' gibi HİÇBİR GİRİŞ VEYA AÇILIŞ CÜMLESİ ASLA YAZMA.
+2. İLK KELİMEDEN İTİBAREN DİREKT OLARAK DERSİN ANA KONUSUNA VE TANIMINA GİRİŞ YAP.
+3. Kelime kalabalığı, ağdalı akademik jargon, resmi basılı kitap dili ve maddeli/numaralı liste yapılarından kaçın.
+4. Sanki birisi konuyu karşısındakine en net ve en anlaşılır şekilde anlatıyormuş gibi akıcı, yalın ve kısa konuşma cümleleri kur.
+5. Sadece seslendirilecek konuşma metnini döndür. Başlık, markdown işareti (*, #, **), madde işareti veya parantez içi not ekleme.
+6. Anlatım net, öz ve dinlemesi keyifli olsun (150 - 250 kelime arası).
+
+DERS ÖZET METNİ:
+{rawSummaryText}
+";
+
+            try
+            {
+                string speechScript = await _aiService.SummarizeTextAsync(prompt);
+                if (!IsAiServiceError(speechScript) && !string.IsNullOrWhiteSpace(speechScript) && speechScript.Length > 30)
+                {
+                    // Ek temizlik: Başta kalan giriş/selamlaşma kelimelerini kesip at
+                    speechScript = Regex.Replace(speechScript, @"^(Merhaba|Selam|Selamlar|Hoş geldiniz|Arkadaşlar|Bugün bu derste|Bugünkü dersimizde|Bu bölümde|Merhaba bugün)[,!.\s]*", "", RegexOptions.IgnoreCase).Trim();
+                    return speechScript;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ConversationalSpeechText Warning]: {ex.Message}");
+            }
+
+            return rawSummaryText;
         }
 
         // 🎯 DOKÜMANA AİT SES KAYDINI SİL

@@ -300,11 +300,18 @@ $s.Dispose();
 
             string clean = markdownText;
 
+            // Markdown başlıklar, listeler ve formatlama işaretleri
             clean = Regex.Replace(clean, @"(?m)^#+\s*", "");
             clean = Regex.Replace(clean, @"\*\*([^*]+)\*\*", "$1");
             clean = Regex.Replace(clean, @"\*([^*]+)\*", "$1");
             clean = Regex.Replace(clean, @"(?m)^\s*[-•*]\s*", "");
             clean = Regex.Replace(clean, @"<[^>]+>", "");
+            clean = Regex.Replace(clean, @"`([^`]+)`", "$1");
+
+            // Konuşma dilini bozan akademik rehber kalıpları ve gereksiz selamlaşma girişleri
+            clean = Regex.Replace(clean, @"DERS REHBERİ\s*", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"Bu rehber, ilgili derse ait[^\n]*\n?", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"^(Merhaba|Selam|Selamlar|Hoş geldiniz|Arkadaşlar|Bugün bu derste|Bugünkü dersimizde|Bu bölümde|Merhaba bugün)[,!.\s]*", "", RegexOptions.IgnoreCase).Trim();
 
             // 🎯 Akademik Terimleri & Kısaltmaları Türkçe Okunuşlarına Çevirme
             clean = Regex.Replace(clean, @"\bP2P\b", "Pii to Pii", RegexOptions.IgnoreCase);
@@ -325,15 +332,12 @@ $s.Dispose();
             clean = Regex.Replace(clean, @"\bsn\b", "saniye", RegexOptions.IgnoreCase);
             clean = Regex.Replace(clean, @"\bdk\b", "dakika", RegexOptions.IgnoreCase);
 
-            clean = Regex.Replace(clean, @"DERS REHBERİ\s*", "");
-            clean = Regex.Replace(clean, @"Bu rehber, ilgili derse ait[^\n]*\n?", "");
-
             clean = Regex.Replace(clean, @"\s+", " ").Trim();
 
             if (clean.Length > 2000)
             {
                 int lastSpace = clean.Substring(0, 2000).LastIndexOf(' ');
-                clean = (lastSpace > 100 ? clean.Substring(0, lastSpace) : clean.Substring(0, 2000)) + ". Özetin devamını okuyarak inceleyebilirsiniz.";
+                clean = (lastSpace > 100 ? clean.Substring(0, lastSpace) : clean.Substring(0, 2000)) + ". Keyifli çalışmalar dilerim.";
             }
 
             return clean;
