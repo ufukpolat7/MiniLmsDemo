@@ -115,7 +115,23 @@ using (var scope = app.Services.CreateScope())
             )
             BEGIN
                 ALTER TABLE [DocumentSummaries] ADD [AudioFilePath] nvarchar(max) NULL;
-            END
+            END;
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = N'SavedQuizzes')
+            BEGIN
+                CREATE TABLE [SavedQuizzes] (
+                    [Id] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    [CourseId] int NOT NULL,
+                    [CourseDocumentId] int NOT NULL,
+                    [UserId] nvarchar(450) NOT NULL,
+                    [SourceFileName] nvarchar(max) NOT NULL,
+                    [Title] nvarchar(max) NOT NULL,
+                    [Difficulty] nvarchar(50) NOT NULL,
+                    [QuestionCount] int NOT NULL,
+                    [QuestionsJson] nvarchar(max) NOT NULL,
+                    [CreatedAt] datetime2 NOT NULL
+                );
+            END;
         ");
     }
     catch (Exception ex)

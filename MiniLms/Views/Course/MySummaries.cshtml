@@ -1,7 +1,9 @@
 @model IEnumerable<MiniLms.Models.DocumentSummary>
 
 @{
-    ViewData["Title"] = "Özel Ders Özetlerim";
+    ViewData["Title"] = "Özel Ders Özetlerim & Quizler";
+    var savedQuizzes = ViewBag.SavedQuizzes as IEnumerable<MiniLms.Models.SavedQuiz>;
+
     var groupedSummaries = Model != null && Model.Any()
         ? Model.GroupBy(s => new {
             CourseId = s.CourseId,
@@ -16,11 +18,14 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h3 class="fw-bold text-primary mb-1">
-                <i class="bi bi-bookmark-star-fill text-warning"></i> Özel Ders Özetlerim
+                <i class="bi bi-bookmark-star-fill text-warning"></i> Özel Ders Özetlerim & Quizlerim
             </h3>
-            <p class="text-muted small mb-0">Tüm dersleriniz için kümelenmiş yapay zeka özetleri ve sesli çalışma notlarınız.</p>
+            <p class="text-muted small mb-0">Derslerinize göre kümelenmiş yapay zeka özetleriniz, sesli notlarınız ve kaydedilmiş quizleriniz.</p>
         </div>
-        <span class="badge bg-primary fs-6 px-3 py-2 shadow-sm">Toplam @(Model?.Count() ?? 0) PDF Özeti Kayıtlı</span>
+        <div class="d-flex gap-2">
+            <span class="badge bg-primary fs-6 px-3 py-2 shadow-sm">Toplam @(Model?.Count() ?? 0) Özet</span>
+            <span class="badge bg-warning text-dark fs-6 px-3 py-2 shadow-sm">Toplam @(savedQuizzes?.Count() ?? 0) Quiz Kayıtlı</span>
+        </div>
     </div>
 
     <!-- 🔊 SESLİ ÖZET ÇALAR PANELİ (STICKY PLAYER) -->
@@ -96,6 +101,10 @@
                 string headingId = $"heading-course-{group.Key.CourseId}";
                 bool isFirst = i == 0;
 
+                var courseQuizzes = savedQuizzes != null 
+                    ? savedQuizzes.Where(q => q.CourseId == group.Key.CourseId).ToList() 
+                    : new List<MiniLms.Models.SavedQuiz>();
+
                 <div class="accordion-item border-0 mb-2 rounded shadow-xs overflow-hidden">
                     <h2 class="accordion-header" id="@headingId">
                         <button class="accordion-button @(isFirst ? "" : "collapsed") bg-light text-dark fw-bold py-3 px-4" type="button" data-bs-toggle="collapse" data-bs-target="#@accordionId" aria-expanded="@(isFirst ? "true" : "false")" aria-controls="@accordionId">
@@ -104,15 +113,25 @@
                                     <span class="badge bg-primary me-2 px-2 py-1">@group.Key.CourseCode</span>
                                     <span class="fs-6 text-dark fw-bold">@group.Key.CourseTitle</span>
                                 </div>
-                                <span class="badge bg-white text-primary border border-primary px-3 py-1">
-                                    <i class="bi bi-file-earmark-pdf me-1"></i> @group.Count() PDF Özeti
-                                </span>
+                                <div class="d-flex gap-2">
+                                    <span class="badge bg-white text-primary border border-primary px-3 py-1">
+                                        <i class="bi bi-file-earmark-pdf me-1"></i> @group.Count() PDF Özeti
+                                    </span>
+                                    @if (courseQuizzes.Any())
+                                    {
+                                        <span class="badge bg-warning text-dark border border-warning px-3 py-1">
+                                            <i class="bi bi-puzzle-fill me-1"></i> @courseQuizzes.Count Quiz Kayıtlı
+                                        </span>
+                                    }
+                                </div>
                             </div>
                         </button>
                     </h2>
                     <div id="@accordionId" class="accordion-collapse collapse @(isFirst ? "show" : "")" aria-labelledby="@headingId" data-bs-parent="#courseSummariesAccordion">
                         <div class="accordion-body bg-white p-3">
-                            <div class="row row-cols-1 row-cols-md-2 g-3">
+                            <!-- 1. DERS ÖZETLERİ -->
+                            <h6 class="fw-bold text-primary mb-3"><i class="bi bi-journal-bookmark-fill me-1"></i> Kaydedilmiş Ders Özetleri</h6>
+                            <div class="row row-cols-1 row-cols-md-2 g-3 mb-4">
                                 @foreach (var summary in group)
                                 {
                                     <div class="col" id="my-summary-card-@summary.Id">
@@ -152,6 +171,44 @@
                                     </div>
                                 }
                             </div>
+
+                            <!-- 2. DERS QUIZLERI -->
+                            @if (courseQuizzes.Any())
+                            {
+                                <div class="pt-3 border-top">
+                                    <h6 class="fw-bold text-dark mb-3"><i class="bi bi-puzzle-fill text-warning me-1"></i> Kaydedilmiş Ders Quizleri (#Quiz ID)</h6>
+                                    <div class="row row-cols-1 row-cols-md-2 g-3">
+                                        @foreach (var quiz in courseQuizzes)
+                                        {
+                                            <div class="col" id="my-quiz-card-@quiz.Id">
+                                                <div class="card h-100 shadow-sm border-warning border-opacity-50 rounded-3">
+                                                    <div class="card-header bg-warning bg-opacity-10 border-0 py-2 d-flex justify-content-between align-items-center">
+                                                        <div>
+                                                            <span class="badge bg-dark me-1" style="font-size: 10px;">Quiz ID: #@quiz.Id</span>
+                                                            <span class="badge bg-warning text-dark fw-bold" style="font-size: 10px;">@quiz.Difficulty.ToUpper()</span>
+                                                        </div>
+                                                        <small class="text-muted" style="font-size: 11px;">⏱️ @quiz.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
+                                                    </div>
+                                                    <div class="card-body py-2">
+                                                        <h6 class="fw-bold text-dark mb-1 text-truncate" title="@quiz.SourceFileName">
+                                                            <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> Kaynak PDF: @(quiz.SourceFileName)
+                                                        </h6>
+                                                        <small class="text-muted d-block mb-2"><i class="bi bi-question-circle me-1"></i> Toplam @quiz.QuestionCount Soru Hazır</small>
+                                                    </div>
+                                                    <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
+                                                        <button type="button" class="btn btn-xs btn-primary btn-sm btn-solve-quiz" data-quizid="@quiz.Id" data-courseid="@quiz.CourseId" data-docid="@quiz.CourseDocumentId">
+                                                            <i class="bi bi-puzzle-fill me-1"></i> Quizi Çöz (#Quiz-@quiz.Id)
+                                                        </button>
+                                                        <button type="button" class="btn btn-xs btn-outline-danger btn-sm btn-delete-quiz" data-quizid="@quiz.Id" title="Quizi Sil">
+                                                            <i class="bi bi-trash"></i> Sil
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
                         </div>
                     </div>
                 </div>
@@ -164,8 +221,8 @@
             <div class="mb-3">
                 <i class="bi bi-journal-bookmark text-muted" style="font-size: 3.5rem;"></i>
             </div>
-            <h5 class="fw-bold text-secondary">Henüz Kaydedilmiş Ders Özetiniz Bulunmuyor</h5>
-            <p class="text-muted small">Ders detay sayfasına giderek dokümanlarınız için <strong>"Özetle"</strong> butonuna tıkladığınızda özetleriniz otomatik olarak derslere kümelenerek buraya kaydedilecektir.</p>
+            <h5 class="fw-bold text-secondary">Henüz Kaydedilmiş Ders Özetiniz veya Quiziniz Bulunmuyor</h5>
+            <p class="text-muted small">Ders detay sayfasına giderek dokümanlarınız için <strong>"Özetle"</strong> veya <strong>"Quiz"</strong> butonuna tıkladığınızda kayıtlarınız otomatik olarak derslere kümelenerek buraya eklenecektir.</p>
             <div>
                 <a asp-controller="Course" asp-action="Index" class="btn btn-primary btn-sm px-4"><i class="bi bi-book me-1"></i> Derslere Göz At</a>
             </div>
@@ -173,7 +230,74 @@
     }
 </div>
 
-<!-- 🎯 ÖZET OKUMA / GÖRÜNTÜLEME MODALI -->
+<!-- 🎯 QUIZ MODALI -->
+<div class="modal fade" id="quizModal" tabindex="-1" aria-labelledby="quizModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content quiz-modal">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title fw-bold" id="quizModalLabel">Doküman Quiz</h5>
+                    <small class="text-muted" id="quizProgressText">Hazırlanıyor...</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <div id="quizSetup" class="quiz-setup mb-3 d-none">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-sm-4">
+                            <label class="form-label small fw-bold text-secondary">Soru Sayısı</label>
+                            <select class="form-select form-select-sm" id="quizQuestionCount">
+                                <option value="3">3 soru</option>
+                                <option value="5" selected>5 soru</option>
+                                <option value="10">10 soru</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-5">
+                            <label class="form-label small fw-bold text-secondary">Zorluk</label>
+                            <select class="form-select form-select-sm" id="quizDifficulty">
+                                <option value="mixed" selected>Karma</option>
+                                <option value="easy">Kolay</option>
+                                <option value="medium">Orta</option>
+                                <option value="hard">Zor</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-3">
+                            <button type="button" class="btn btn-primary btn-sm w-100" id="quizStartBtn">Başlat</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress quiz-progress mb-3" role="progressbar" aria-label="Quiz ilerleme">
+                    <div class="progress-bar" id="quizProgressBar" style="width: 0%"></div>
+                </div>
+
+                <div id="quizLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-3 mb-0">Quiz hazırlanıyor...</p>
+                </div>
+
+                <div id="quizQuestionArea" class="d-none">
+                    <div class="quiz-meta mb-3" id="quizMeta"></div>
+                    <h5 class="quiz-question" id="quizQuestionText"></h5>
+                    <div id="quizOptions" class="quiz-options"></div>
+                    <div id="quizFeedback" class="quiz-feedback d-none"></div>
+                </div>
+
+                <div id="quizResultArea" class="d-none text-center py-4">
+                    <div class="quiz-score" id="quizScoreText"></div>
+                    <p class="text-muted mb-3" id="quizScoreDetail"></p>
+                    <div id="quizReview" class="text-start"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
+                <button type="button" class="btn btn-primary" id="quizNextBtn" disabled>Sonraki</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 🎯 ÖZET OKUMA MODALI -->
 <div class="modal fade" id="viewSummaryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content shadow-lg">
@@ -240,6 +364,7 @@
         $(document).ready(function () {
             var viewModal = new bootstrap.Modal(document.getElementById("viewSummaryModal"));
             var editModal = new bootstrap.Modal(document.getElementById("editSummaryModal"));
+            var quizModal = new bootstrap.Modal(document.getElementById("quizModal"));
 
             var quillMySummaries = new Quill('#quillEditorMySummaries', {
                 theme: 'snow',
@@ -257,7 +382,227 @@
                 }
             });
 
-            // 🎯 🔊 SESLİ ÖZET DURUMU VE OYNATICI JS KODLARI
+            // 🎯 QUIZ STATE
+            var quizState = { questions: [], currentIndex: 0, answers: [], selectedIndex: null, documentId: null, courseId: null };
+
+            function escapeHtml(text) {
+                if (!text) return "";
+                return text.toString()
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+            function getDifficultyDotHtml(difficulty) {
+                var diff = (difficulty || "").toString().toLowerCase();
+                var dotClass = "easy";
+                var titleText = "Kolay Seviye (Hatırlama ve Kavrama)";
+
+                if (diff.indexOf("zor") !== -1 || diff.indexOf("hard") !== -1) {
+                    dotClass = "hard";
+                    titleText = "Zor Seviye (Değerlendirme ve Sentez)";
+                } else if (diff.indexOf("orta") !== -1 || diff.indexOf("medium") !== -1) {
+                    dotClass = "medium";
+                    titleText = "Orta Seviye (Uygulama ve Analiz)";
+                } else if (diff.indexOf("kolay") !== -1 || diff.indexOf("easy") !== -1) {
+                    dotClass = "easy";
+                    titleText = "Kolay Seviye (Hatırlama ve Kavrama)";
+                }
+
+                return '<span class="quiz-difficulty-dot ' + dotClass + '" title="' + titleText + '"></span>';
+            }
+
+            function resetQuizModal() {
+                quizState = { questions: [], currentIndex: 0, answers: [], selectedIndex: null, documentId: quizState.documentId, courseId: quizState.courseId };
+                $("#quizModalLabel").text("Doküman Quiz");
+                $("#quizProgressText").text("Yükleniyor...");
+                $("#quizProgressBar").css("width", "0%");
+                $("#quizSetup").addClass("d-none");
+                $("#quizLoading").removeClass("d-none");
+                $("#quizQuestionArea").addClass("d-none");
+                $("#quizResultArea").addClass("d-none");
+                $("#quizFeedback").addClass("d-none").empty();
+                $("#quizOptions").empty();
+                $("#quizNextBtn").prop("disabled", true).text("Sonraki").removeClass("btn-success").addClass("btn-primary");
+            }
+
+            function renderQuizQuestion() {
+                var question = quizState.questions[quizState.currentIndex];
+                quizState.selectedIndex = quizState.answers[quizState.currentIndex];
+                var progress = ((quizState.currentIndex + 1) / quizState.questions.length) * 100;
+
+                $("#quizLoading").addClass("d-none");
+                $("#quizResultArea").addClass("d-none");
+                $("#quizQuestionArea").removeClass("d-none");
+                $("#quizProgressBar").css("width", progress + "%");
+
+                var dotHtml = getDifficultyDotHtml(question.difficulty);
+
+                $("#quizMeta").html(
+                    "<div class='d-flex justify-content-between align-items-center w-100'>" +
+                    "<div class='d-flex align-items-center gap-1 flex-wrap'>" +
+                    "<span class='quiz-pill'>" + escapeHtml(question.difficulty || "Orta") + "</span>" +
+                    "<span class='quiz-pill'>" + escapeHtml(question.bloomLevel || "Anlama") + "</span>" +
+                    "<span class='quiz-pill muted'>" + escapeHtml(question.topic || "Doküman içeriği") + "</span>" +
+                    "</div>" +
+                    "<div class='d-flex align-items-center gap-2 me-1' title='Sorunun Zorluk Seviyesi (Bloom Taksonomisi)'>" +
+                    "<small class='text-muted fw-bold' style='font-size: 0.72rem;'>ZORLUK:</small>" +
+                    dotHtml +
+                    "</div>" +
+                    "</div>"
+                );
+                $("#quizQuestionText").text(question.question);
+                $("#quizFeedback").addClass("d-none").empty();
+                $("#quizNextBtn")
+                    .prop("disabled", quizState.selectedIndex === null)
+                    .text(quizState.currentIndex === quizState.questions.length - 1 ? "Bitir" : "Sonraki")
+                    .removeClass("btn-success")
+                    .addClass("btn-primary");
+
+                var optionsHtml = "";
+                question.options.forEach(function (option, index) {
+                    var selectedClass = quizState.selectedIndex === index ? " selected" : "";
+                    optionsHtml += "<button type='button' class='quiz-option" + selectedClass + "' data-index='" + index + "'><span>" + String.fromCharCode(65 + index) + "</span><strong>" + escapeHtml(option) + "</strong></button>";
+                });
+                $("#quizOptions").html(optionsHtml);
+            }
+
+            $(document).on("click", ".quiz-option", function () {
+                quizState.selectedIndex = parseInt($(this).data("index"));
+                $(".quiz-option").removeClass("selected");
+                $(this).addClass("selected");
+                $("#quizNextBtn").prop("disabled", false);
+            });
+
+            $("#quizNextBtn").click(function () {
+                if (quizState.selectedIndex === null) return;
+                quizState.answers[quizState.currentIndex] = quizState.selectedIndex;
+
+                if (quizState.currentIndex >= quizState.questions.length - 1) {
+                    renderQuizResult();
+                    return;
+                }
+                quizState.currentIndex++;
+                renderQuizQuestion();
+            });
+
+            function renderQuizResult() {
+                var score = 0;
+                var reviewHtml = "";
+
+                quizState.questions.forEach(function (question, index) {
+                    var userAnswer = quizState.answers[index];
+                    var isCorrect = userAnswer === question.correctIndex;
+                    if (isCorrect) score++;
+
+                    reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + " position-relative shadow-sm'>";
+                    reviewHtml += "<div class='position-absolute top-0 end-0 m-3 d-flex align-items-center gap-1'>" + getDifficultyDotHtml(question.difficulty) + "</div>";
+                    reviewHtml += "<h6 class='fw-bold mb-2'>" + (index + 1) + ". " + escapeHtml(question.question) + "</h6>";
+                    reviewHtml += "<div class='quiz-review-meta mb-2'><span>" + escapeHtml(question.difficulty || "Orta") + "</span><span>" + escapeHtml(question.bloomLevel || "Anlama") + "</span><span>" + escapeHtml(question.topic || "Doküman içeriği") + "</span></div>";
+
+                    reviewHtml += "<div class='my-2'>";
+                    question.options.forEach(function (optText, optIdx) {
+                        var letter = String.fromCharCode(65 + optIdx);
+                        if (optIdx === question.correctIndex) {
+                            reviewHtml += "<div class='quiz-review-option correct-option'><span class='d-flex align-items-center gap-2'><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span> <span class='badge bg-success text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-check-circle-fill me-1'></i> Doğru Cevap</span></div>";
+                        } else if (optIdx === userAnswer && !isCorrect) {
+                            reviewHtml += "<div class='quiz-review-option wrong-option'><span class='d-flex align-items-center gap-2'><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span> <span class='badge bg-danger text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-x-circle-fill me-1'></i> Senin Yanlış Seçimin</span></div>";
+                        } else {
+                            reviewHtml += "<div class='quiz-review-option neutral-option'><span><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span></div>";
+                        }
+                    });
+                    reviewHtml += "</div>";
+
+                    reviewHtml += "<div class='mt-2 p-2 rounded bg-white bg-opacity-60 border'>" +
+                                  "<small class='d-block text-dark fw-bold'><i class='bi bi-info-circle me-1 text-primary'></i> AÇIKLAMA:</small>" +
+                                  "<small class='text-secondary'>" + escapeHtml(question.explanation || "") + "</small>";
+
+                    if (question.whyWrong && question.whyWrong[userAnswer] && userAnswer !== question.correctIndex) {
+                        reviewHtml += "<small class='d-block mt-1 text-danger fw-bold'><i class='bi bi-exclamation-triangle me-1'></i> Seçimin Neden Yanlış: " + escapeHtml(question.whyWrong[userAnswer]) + "</small>";
+                    }
+                    if (question.sourceHint) {
+                        reviewHtml += "<small class='d-block mt-1 text-muted'><i class='bi bi-search me-1'></i> Kaynak İpucu: " + escapeHtml(question.sourceHint) + "</small>";
+                    }
+                    reviewHtml += "</div></div>";
+                });
+
+                $("#quizQuestionArea").addClass("d-none");
+                $("#quizResultArea").removeClass("d-none");
+                $("#quizProgressText").text("Tamamlandı");
+                $("#quizProgressBar").css("width", "100%");
+                $("#quizScoreText").text(score + " / " + quizState.questions.length);
+                $("#quizScoreDetail").text("Quiz tamamlandı. Aşağıda cevaplarını kontrol edebilirsin.");
+                $("#quizReview").html(reviewHtml);
+                $("#quizNextBtn").prop("disabled", true).text("Tamamlandı").removeClass("btn-primary").addClass("btn-success");
+            }
+
+            function showQuizError(message) {
+                $("#quizLoading").addClass("d-none");
+                $("#quizQuestionArea").addClass("d-none");
+                $("#quizResultArea").removeClass("d-none");
+                $("#quizScoreText").text("Quiz yüklenemedi");
+                $("#quizScoreDetail").text(message);
+                $("#quizReview").empty();
+                $("#quizNextBtn").prop("disabled", true);
+            }
+
+            // 🎯 KAYDEDİLMİŞ QUIZI ÇÖZ
+            $(document).on("click", ".btn-solve-quiz", function () {
+                var quizId = $(this).data("quizid");
+                var courseId = $(this).data("courseid");
+                var docId = $(this).data("docid");
+
+                quizState.documentId = docId;
+                quizState.courseId = courseId;
+
+                resetQuizModal();
+                quizModal.show();
+
+                $.ajax({
+                    url: '@Url.Action("DocumentQuizSession", "Course")',
+                    type: 'GET',
+                    data: { courseId: courseId, documentId: docId, quizId: quizId },
+                    success: function (data) {
+                        if (data.success && data.questions && data.questions.length > 0) {
+                            var cacheBadge = " <span class='badge bg-info text-white' style='font-size:0.75rem!important;'>💾 Kaydedilmiş Quiz (ID: #" + data.quizId + ")</span>";
+                            $("#quizModalLabel").html(escapeHtml(data.title || "Doküman Quiz") + cacheBadge);
+                            if (data.sourceFileName) {
+                                $("#quizProgressText").html("<span class='text-primary fw-bold'><i class='bi bi-file-earmark-pdf-fill text-danger me-1'></i> Kaynak PDF: " + escapeHtml(data.sourceFileName) + "</span>");
+                            }
+
+                            quizState.questions = data.questions;
+                            quizState.answers = new Array(data.questions.length).fill(null);
+                            quizState.currentIndex = 0;
+                            renderQuizQuestion();
+                        } else {
+                            showQuizError(data.response || "Quiz yüklenemedi.");
+                        }
+                    },
+                    error: function () {
+                        showQuizError("Quiz verisi alınırken sunucu hatası oluştu.");
+                    }
+                });
+            });
+
+            // 🎯 KAYDEDİLMİŞ QUIZI SİL
+            $(document).on("click", ".btn-delete-quiz", function () {
+                var quizId = $(this).data("quizid");
+                if (confirm("Quiz #" + quizId + " numaralı quizi silmek istediğinize emin misiniz?")) {
+                    $.post('@Url.Action("DeleteQuiz", "Course")', { quizId: quizId }, function (res) {
+                        if (res.success) {
+                            $("#my-quiz-card-" + quizId).fadeOut(300, function () { $(this).remove(); });
+                            alert("✅ " + res.message);
+                            location.reload();
+                        } else {
+                            alert("⚠️ " + res.message);
+                        }
+                    });
+                }
+            });
+
+            // 🎯 SESLİ ÖZET JS KODLARI
             var audioState = { isPlaying: false };
             var activeAudioState = { courseId: null, documentId: null };
             var activeAudioRequestId = 0;
@@ -349,7 +694,6 @@
                 triggerAudioSummary(courseId, docId, false);
             });
 
-            // 🔄 Yeniden Ses Üret
             $("#btnRefreshAudioSummary").click(function () {
                 if (activeAudioState.courseId && activeAudioState.documentId) {
                     if (confirm("Bu dokümanın sesli özetini yeniden ürettirmek istediğinizden emin misiniz?")) {
@@ -358,7 +702,6 @@
                 }
             });
 
-            // 🗑️ Sesi Sil
             $("#btnDeleteAudioSummary").click(function () {
                 if (activeAudioState.courseId && activeAudioState.documentId) {
                     if (confirm("Bu dokümana ait ses kaydını silmek istediğinize emin misiniz?")) {
@@ -380,7 +723,6 @@
                 }
             });
 
-            // 🎚️ Saniye Sayacı ve Slider Kontrolleri
             function formatAudioTime(seconds) {
                 if (isNaN(seconds) || seconds < 0) return "00:00";
                 var mins = Math.floor(seconds / 60);
@@ -441,7 +783,7 @@
                 }
             });
 
-            // 🎯 METİN ÖZETİ GÖRÜNTÜLEME VE DÜZENLEME
+            // METİN ÖZETİ İŞLEMLERİ
             function formatAiResponseToHtml(rawText) {
                 if (!rawText) return "";
                 if (rawText.indexOf("<p>") !== -1 || rawText.indexOf("<strong>") !== -1 || rawText.indexOf("<h") !== -1) {

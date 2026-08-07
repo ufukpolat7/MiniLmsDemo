@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MiniLms.Interfaces;
+using MiniLms.Models;
 using MiniLms.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -639,6 +640,15 @@ namespace MiniLms.Controllers
                 .OrderByDescending(s => s.CreatedAt)
                 .ToListAsync();
 
+            var savedQuizzes = await _dbContext.SavedQuizzes
+                .Include(q => q.Course)
+                .Include(q => q.CourseDocument)
+                .Where(q => q.UserId == userId)
+                .OrderByDescending(q => q.CreatedAt)
+                .ToListAsync();
+
+            ViewBag.SavedQuizzes = savedQuizzes;
+
             return View(summaries);
         }
 
@@ -778,11 +788,36 @@ namespace MiniLms.Controllers
             }
         }
 
+        // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama ve Yeniden Üretme Destekli)
         [HttpGet]
-        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed")
+        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = false, int? quizId = null)
         {
             try
             {
+                var userId = _userManager.GetUserId(User) ?? string.Empty;
+
+                // 🎯 1. Eğer belirli bir Quiz ID istendiyse, doğrudan veritabanından getir!
+                if (quizId.HasValue && quizId.Value > 0)
+                {
+                    var savedQuiz = await _dbContext.SavedQuizzes
+                        .Include(q => q.CourseDocument)
+                        .FirstOrDefaultAsync(q => q.Id == quizId.Value);
+
+                    if (savedQuiz != null)
+                    {
+                        var quizQuestions = JsonSerializer.Deserialize<List<QuizQuestionDto>>(savedQuiz.QuestionsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<QuizQuestionDto>();
+                        return Json(new
+                        {
+                            success = true,
+                            quizId = savedQuiz.Id,
+                            title = $"{savedQuiz.SourceFileName} Quiz (ID: #{savedQuiz.Id})",
+                            sourceFileName = savedQuiz.SourceFileName,
+                            isCached = true,
+                            questions = quizQuestions
+                        });
+                    }
+                }
+
                 var document = await _courseDocumentService.GetDocumentByIdAsync(documentId);
                 if (document == null || document.CourseId != courseId)
                 {
@@ -790,23 +825,68 @@ namespace MiniLms.Controllers
                 }
 
                 questionCount = Math.Clamp(questionCount, 3, 10);
+                difficulty = NormalizeDifficulty(difficulty);
 
+                // 🎯 2. Eğer yenileme (forceRefresh) istenmediyse, veritabanında var olan en son kaydı kontrol et!
+                if (!forceRefresh)
+                {
+                    var existingQuiz = await _dbContext.SavedQuizzes
+                        .Where(q => q.CourseDocumentId == documentId && q.UserId == userId)
+                        .OrderByDescending(q => q.CreatedAt)
+                        .FirstOrDefaultAsync();
+
+                    if (existingQuiz != null && !string.IsNullOrWhiteSpace(existingQuiz.QuestionsJson))
+                    {
+                        var cachedQuestions = JsonSerializer.Deserialize<List<QuizQuestionDto>>(existingQuiz.QuestionsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<QuizQuestionDto>();
+                        if (cachedQuestions.Count > 0)
+                        {
+                            return Json(new
+                            {
+                                success = true,
+                                quizId = existingQuiz.Id,
+                                title = $"{existingQuiz.SourceFileName} Quiz (ID: #{existingQuiz.Id})",
+                                sourceFileName = existingQuiz.SourceFileName,
+                                isCached = true,
+                                questions = cachedQuestions
+                            });
+                        }
+                    }
+                }
+
+                // 🎯 3. Kayıtlı quiz yoksa veya forceRefresh == true ise yeni quiz üret!
                 var documentTexts = await _courseDocumentService.GetDocumentTextChunksAsync(documentId, maxChunks: 8);
                 if (documentTexts.Count == 0)
                 {
                     return Json(new { success = false, response = "Bu dokümandan quiz üretilecek metin çıkarılamadı." });
                 }
 
-                difficulty = NormalizeDifficulty(difficulty);
                 var questions = await BuildInteractiveDocumentQuizAsync(document.FileName, documentTexts, questionCount, difficulty);
                 if (questions.Count == 0)
                 {
                     return Json(new
                     {
                         success = false,
-                        response = "Bu dokümandan kaliteli quiz sorusu çıkarılamadı. Dokümanda daha açıklayıcı metinler olduğundan emin olun veya Gemini API bağlantısını düzeltin."
+                        response = "Bu dokümandan kaliteli quiz sorusu çıkarılamadı. Dokümanda daha açıklayıcı metinler olduğundan emin olun."
                     });
                 }
+
+                // 🎯 4. Üretilen quizi veritabanına kaydet ve ID ata!
+                string jsonQuestions = JsonSerializer.Serialize(questions);
+                var newQuiz = new SavedQuiz
+                {
+                    CourseId = courseId,
+                    CourseDocumentId = documentId,
+                    UserId = userId,
+                    SourceFileName = document.FileName,
+                    Title = $"{document.FileName} Quiz",
+                    Difficulty = difficulty,
+                    QuestionCount = questions.Count,
+                    QuestionsJson = jsonQuestions,
+                    CreatedAt = DateTime.Now
+                };
+
+                _dbContext.SavedQuizzes.Add(newQuiz);
+                await _dbContext.SaveChangesAsync();
 
                 return Json(new
                 {
@@ -897,49 +977,73 @@ Ders kaynaklarından bulunan içerik:
         private async Task<List<QuizQuestionDto>> BuildInteractiveDocumentQuizAsync(string fileName, List<string> documentTexts, int questionCount, string difficulty)
         {
             string sourceText = string.Join("\n\n", documentTexts);
+
+            string bloomRulesInstruction = @"
+Eğitimsel Yaklaşım ve Zorluk Derecelendirme Kuralları (Bloom Taksonomisi):
+
+1. KOLAY SEVİYE (Hatırlama ve Kavrama):
+   - Metin içinde doğrudan yer alan bilgilerin, tanımların, tarihlerin veya isimlerin sorulduğu sorulardır.
+   - Öğrencinin sadece okuduğunu hatırlaması ve kavraması beklenir.
+   - Örnek Soru Tipleri: 'X nedir?', 'Y olayı ne zaman gerçekleşmiştir?', 'Z tanımı ne anlama gelir?'
+
+2. ORTA SEVİYE (Uygulama ve Analiz):
+   - Doğrudan ezber yerine, metindeki bilginin yorumlanmasını veya iki farklı kavramın karşılaştırılmasını gerektiren sorulardır.
+   - Öğrencinin konunun mantığını anlamış, uygulayabilir ve analiz edebilir olması gerekir.
+   - Örnek Soru Tipleri: 'X ve Y arasındaki temel fark nedir?', 'Bu duruma metinden hangi örnek verilebilir?', 'X mekanizmasının çalışma mantığı hangisidir?'
+
+3. ZOR SEVİYE (Değerlendirme ve Sentez):
+   - Parçanın bütününe hakimiyet gerektiren, doğrudan metinde yazmayan ancak metinden çıkarım (inference) yapılmasıyla bulunabilecek sorulardır.
+   - Birden fazla paragraftaki veya sayfadaki bilgiyi birleştirerek (multi-hop reasoning) çözüme ulaşmayı gerektirir.
+   - Örnek Soru Tipleri: 'Metindeki bilgilere dayanarak hangi genel yargıya varılabilir?', 'X ve Y süreçleri birlikte düşünüldüğünde ortaya çıkacak sonuç nedir?'
+";
+
             string difficultyInstruction = difficulty switch
             {
-                "easy" => "Sorular kolay seviyede olsun: temel kavram, tanım ve doğrudan bilgi yoklama ağırlıklı olsun.",
-                "medium" => "Sorular orta seviyede olsun: kavram ilişkisi, neden-sonuç ve kısa yorum gerektirsin.",
-                "hard" => "Sorular zor seviyede olsun: senaryo, çıkarım, karşılaştırma ve analiz gerektirsin.",
-                _ => "Sorular karma seviyede olsun: kolay, orta ve zor soruları dengeli dağıt."
+                "easy" => "Sadece KOLAY seviye (Hatırlama ve Kavrama) sorular üret. Metindeki tanımları ve doğrudan bilgileri yokla.",
+                "medium" => "Sadece ORTA seviye (Uygulama ve Analiz) sorular üret. Yorumlama, analiz ve kavram karşılaştırması gerektiren sorular sor.",
+                "hard" => "Sadece ZOR seviye (Değerlendirme ve Sentez) sorular üret. Doğrudan metinde yazmayan, metinden çıkarım (inference) ve çoklu paragraf birleştirmesi (multi-hop reasoning) gerektiren üst düzey sorular sor.",
+                _ => "Dengeli karma dağılım yap: %30 Kolay (Hatırlama/Kavrama), %40 Orta (Uygulama/Analiz), %30 Zor (Değerlendirme/Sentez) soruları ekle."
             };
 
             string jsonPrompt = $@"
-                Aşağıdaki ders dokümanına göre Türkçe {questionCount} adet çoktan seçmeli quiz üret.
-                Sadece geçerli JSON döndür. Markdown, açıklama veya kod bloğu kullanma.
-                JSON formatı:
-                [
-                  {{
-                    ""question"": ""Soru metni"",
-                    ""options"": [""A seçeneği"", ""B seçeneği"", ""C seçeneği"", ""D seçeneği""],
-                    ""correctIndex"": 0,
-                    ""explanation"": ""Doğru cevabı açıklayan kısa gerekçe"",
-                    ""topic"": ""Soru konusu"",
-                    ""difficulty"": ""Kolay | Orta | Zor"",
-                    ""bloomLevel"": ""Hatırlama | Anlama | Uygulama | Analiz | Değerlendirme"",
-                    ""sourceHint"": ""Sorunun dayandığı kısa kaynak ipucu"",
-                    ""whyWrong"": [""A yanlışsa nedeni"", ""B yanlışsa nedeni"", ""C yanlışsa nedeni"", ""D yanlışsa nedeni""]
-                  }}
-                ]
-                Kurallar:
-                - Sorular yalnızca doküman metnine dayansın.
-                - correctIndex 0 ile 3 arasında sayı olsun.
-                - Her soruda tam 4 seçenek olsun.
-                - Yanlış seçenekler dokümandaki yakın kavramlardan türetilsin, bariz komik/kolay olmasın.
-                - 'Hangisi dokümanda geçer?' gibi yüzeysel soru yazma; kavram, ilişki, neden-sonuç veya uygulama sor.
-                - Cevabı yalnızca seçenek uzunluğundan veya bariz ifadelerden tahmin edilebilir yapma.
-                - Seçenekler birbirine benzer uzunlukta ve aynı türde olsun.
-                - whyWrong dizisi tam 4 elemanlı olsun; doğru seçenek için 'Doğru seçenek.' yaz.
-                - Bloom seviyelerini çeşitlendir; sadece ezber sorusu yazma.
-                - {difficultyInstruction}
+Aşağıdaki ders dokümanına dayanarak Bloom Taksonomisi prensiplerine tam uyumlu Türkçe {questionCount} adet çoktan seçmeli quiz sorusu üret.
 
-                DOKÜMAN ADI:
-                {fileName}
+{bloomRulesInstruction}
 
-                DOKÜMAN METNİ:
-                {sourceText}
-            ";
+SEÇİLEN ZORLUK STRATEJİSİ:
+{difficultyInstruction}
+
+Sadece geçerli JSON döndür. Markdown, açıklama veya kod bloğu kullanma.
+JSON formatı:
+[
+  {{
+    ""question"": ""Soru metni"",
+    ""options"": [""A seçeneği"", ""B seçeneği"", ""C seçeneği"", ""D seçeneği""],
+    ""correctIndex"": 0,
+    ""explanation"": ""Doğru cevabı açıklayan detaylı gerekçe"",
+    ""topic"": ""Soru konusu"",
+    ""difficulty"": ""Kolay | Orta | Zor"",
+    ""bloomLevel"": ""Hatırlama ve Kavrama | Uygulama ve Analiz | Değerlendirme ve Sentez"",
+    ""sourceHint"": ""Sorunun dayandığı kısa kaynak ipucu"",
+    ""whyWrong"": [""A yanlışsa nedeni"", ""B yanlışsa nedeni"", ""C yanlışsa nedeni"", ""D yanlışsa nedeni""]
+  }}
+]
+
+Kurallar:
+- Sorular yalnızca doküman metnine dayansın.
+- correctIndex 0 ile 3 arasında sayı olsun.
+- Her soruda tam 4 seçenek olsun.
+- Yanlış seçenekler dokümandaki yakın kavramlardan türetilsin, bariz komik/kolay olmasın.
+- Bloom seviyelerine tam olarak uy: Kolay soruda doğrudan metinsel tanım/hatırlama, orta soruda ilişki/analiz, zor soruda sentez/çıkarım tekniklerini uygula.
+- Zor sorularda doğrudan metindeki cümleyi kopyalama; öğrencinin metindeki birden fazla bilgiyi birleştirerek çıkarım yapmasını zorunlu kıl.
+- whyWrong dizisi tam 4 elemanlı olsun; doğru seçenek için 'Doğru seçenek.' yaz.
+
+DOKÜMAN ADI:
+{fileName}
+
+DOKÜMAN METNİ:
+{sourceText}
+";
 
             string aiResponse = await _aiService.SummarizeTextAsync(jsonPrompt);
             if (!IsAiServiceError(aiResponse))

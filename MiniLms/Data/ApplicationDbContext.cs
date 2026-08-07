@@ -21,6 +21,7 @@ namespace MiniLms.Data
         public DbSet<Enrollment> Enrollments { get; set; }
         public DbSet<Student> Students { get; set; }
         public DbSet<DocumentSummary> DocumentSummaries { get; set; }
+        public DbSet<SavedQuiz> SavedQuizzes { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -63,6 +64,18 @@ namespace MiniLms.Data
                 .HasOne(s => s.CourseDocument)
                 .WithMany()
                 .HasForeignKey(s => s.CourseDocumentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<SavedQuiz>()
+                .HasOne(q => q.Course)
+                .WithMany()
+                .HasForeignKey(q => q.CourseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<SavedQuiz>()
+                .HasOne(q => q.CourseDocument)
+                .WithMany()
+                .HasForeignKey(q => q.CourseDocumentId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

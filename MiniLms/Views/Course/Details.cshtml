@@ -1176,103 +1176,164 @@
         $("#quizNextBtn").prop("disabled", true).text("Sonraki").removeClass("btn-success").addClass("btn-primary");
         }
 
-        function loadQuiz() {
-        var courseId = '@Model.Id';
-        var questionCount = $("#quizQuestionCount").val();
-        var difficulty = $("#quizDifficulty").val();
+        function loadQuiz(forceRefresh, quizId) {
+            var courseId = '@Model.Id';
+            var questionCount = $("#quizQuestionCount").val();
+            var difficulty = $("#quizDifficulty").val();
 
-        $("#quizSetup").addClass("d-none");
-        $("#quizLoading").removeClass("d-none");
-        $("#quizProgressText").text("Hazırlanıyor...");
-        $("#quizStartBtn").prop("disabled", true);
+            $("#quizSetup").addClass("d-none");
+            $("#quizLoading").removeClass("d-none");
+            $("#quizProgressText").text("Hazırlanıyor...");
+            $("#quizStartBtn").prop("disabled", true);
 
-        $.ajax({
-        url: '@Url.Action("DocumentQuizSession", "Course")',
-        type: 'GET',
-        data: { courseId: courseId, documentId: quizState.documentId, questionCount: questionCount, difficulty: difficulty },
-        success: function (data) {
-        if (data.success && data.questions && data.questions.length > 0) {
-        $("#quizModalLabel").text(data.title || "Doküman Quiz");
-        quizState.questions = data.questions;
-        quizState.answers = new Array(data.questions.length).fill(null);
-        quizState.currentIndex = 0;
-        renderQuizQuestion();
-        } else {
-        showQuizError(data.response || "Quiz hazırlanamadı.");
+            $.ajax({
+                url: '@Url.Action("DocumentQuizSession", "Course")',
+                type: 'GET',
+                data: { 
+                    courseId: courseId, 
+                    documentId: quizState.documentId, 
+                    questionCount: questionCount, 
+                    difficulty: difficulty, 
+                    forceRefresh: forceRefresh === true,
+                    quizId: quizId || null
+                },
+                success: function (data) {
+                    if (data.success && data.questions && data.questions.length > 0) {
+                        var cacheBadge = data.isCached ? " <span class='badge bg-info text-white fs-6' style='font-size:0.75rem!important;'>💾 Kaydedilmiş Quiz (ID: #" + data.quizId + ")</span>" : " <span class='badge bg-success text-white' style='font-size:0.75rem!important;'>✨ Yeni Üretildi (ID: #" + data.quizId + ")</span>";
+                        
+                        $("#quizModalLabel").html(escapeHtml(data.title || "Doküman Quiz") + cacheBadge);
+                        if (data.sourceFileName) {
+                            $("#quizProgressText").html("<span class='text-primary fw-bold'><i class='bi bi-file-earmark-pdf-fill text-danger me-1'></i> Kaynak PDF: " + escapeHtml(data.sourceFileName) + "</span>");
+                        }
+
+                        quizState.questions = data.questions;
+                        quizState.answers = new Array(data.questions.length).fill(null);
+                        quizState.currentIndex = 0;
+                        renderQuizQuestion();
+                    } else {
+                        showQuizError(data.response || "Quiz hazırlanamadı.");
+                    }
+                },
+                error: function () {
+                    showQuizError("Quiz oluşturulurken teknik bir iletişim hatası meydana geldi.");
+                },
+                complete: function () {
+                    $("#quizStartBtn").prop("disabled", false);
+                }
+            });
         }
-        },
-        error: function () {
-        showQuizError("Quiz oluşturulurken teknik bir iletişim hatası meydana geldi.");
-        },
-        complete: function () {
-        $("#quizStartBtn").prop("disabled", false);
-        }
-        });
+
+        function getDifficultyDotHtml(difficulty) {
+            var diff = (difficulty || "").toString().toLowerCase();
+            var dotClass = "easy";
+            var titleText = "Kolay Seviye (Hatırlama ve Kavrama)";
+
+            if (diff.indexOf("zor") !== -1 || diff.indexOf("hard") !== -1) {
+                dotClass = "hard";
+                titleText = "Zor Seviye (Değerlendirme ve Sentez)";
+            } else if (diff.indexOf("orta") !== -1 || diff.indexOf("medium") !== -1) {
+                dotClass = "medium";
+                titleText = "Orta Seviye (Uygulama ve Analiz)";
+            } else if (diff.indexOf("kolay") !== -1 || diff.indexOf("easy") !== -1) {
+                dotClass = "easy";
+                titleText = "Kolay Seviye (Hatırlama ve Kavrama)";
+            }
+
+            return '<span class="quiz-difficulty-dot ' + dotClass + '" data-bs-toggle="tooltip" data-bs-placement="left" title="' + titleText + '"></span>';
         }
 
         function renderQuizQuestion() {
-        var question = quizState.questions[quizState.currentIndex];
-        quizState.selectedIndex = quizState.answers[quizState.currentIndex];
-        var progress = ((quizState.currentIndex + 1) / quizState.questions.length) * 100;
+            var question = quizState.questions[quizState.currentIndex];
+            quizState.selectedIndex = quizState.answers[quizState.currentIndex];
+            var progress = ((quizState.currentIndex + 1) / quizState.questions.length) * 100;
 
-        $("#quizLoading").addClass("d-none");
-        $("#quizResultArea").addClass("d-none");
-        $("#quizQuestionArea").removeClass("d-none");
-        $("#quizProgressText").text("Soru " + (quizState.currentIndex + 1) + " / " + quizState.questions.length);
-        $("#quizProgressBar").css("width", progress + "%");
-        $("#quizMeta").html(
-        "<span class='quiz-pill'>" + escapeHtml(question.difficulty || "Orta") + "</span>" +
-        "<span class='quiz-pill'>" + escapeHtml(question.bloomLevel || "Anlama") + "</span>" +
-        "<span class='quiz-pill muted'>" + escapeHtml(question.topic || "Doküman içeriği") + "</span>"
-        );
-        $("#quizQuestionText").text(question.question);
-        $("#quizFeedback").addClass("d-none").empty();
-        $("#quizNextBtn")
-        .prop("disabled", quizState.selectedIndex === null)
-        .text(quizState.currentIndex === quizState.questions.length - 1 ? "Bitir" : "Sonraki")
-        .removeClass("btn-success")
-        .addClass("btn-primary");
+            $("#quizLoading").addClass("d-none");
+            $("#quizResultArea").addClass("d-none");
+            $("#quizQuestionArea").removeClass("d-none");
+            $("#quizProgressText").text("Soru " + (quizState.currentIndex + 1) + " / " + quizState.questions.length);
+            $("#quizProgressBar").css("width", progress + "%");
 
-        var optionsHtml = "";
-        question.options.forEach(function (option, index) {
-        var selectedClass = quizState.selectedIndex === index ? " selected" : "";
-        optionsHtml += "<button type='button' class='quiz-option" + selectedClass + "' data-index='" + index + "'><span>" + String.fromCharCode(65 + index) + "</span><strong>" + escapeHtml(option) + "</strong></button>";
-        });
-        $("#quizOptions").html(optionsHtml);
+            var dotHtml = getDifficultyDotHtml(question.difficulty);
+
+            $("#quizMeta").html(
+                "<div class='d-flex justify-content-between align-items-center w-100'>" +
+                "<div class='d-flex align-items-center gap-1 flex-wrap'>" +
+                "<span class='quiz-pill'>" + escapeHtml(question.difficulty || "Orta") + "</span>" +
+                "<span class='quiz-pill'>" + escapeHtml(question.bloomLevel || "Anlama") + "</span>" +
+                "<span class='quiz-pill muted'>" + escapeHtml(question.topic || "Doküman içeriği") + "</span>" +
+                "</div>" +
+                "<div class='d-flex align-items-center gap-2 me-1' title='Sorunun Zorluk Seviyesi (Bloom Taksonomisi)'>" +
+                "<small class='text-muted fw-bold' style='font-size: 0.72rem;'>ZORLUK:</small>" +
+                dotHtml +
+                "</div>" +
+                "</div>"
+            );
+            $("#quizQuestionText").text(question.question);
+            $("#quizFeedback").addClass("d-none").empty();
+            $("#quizNextBtn")
+                .prop("disabled", quizState.selectedIndex === null)
+                .text(quizState.currentIndex === quizState.questions.length - 1 ? "Bitir" : "Sonraki")
+                .removeClass("btn-success")
+                .addClass("btn-primary");
+
+            var optionsHtml = "";
+            question.options.forEach(function (option, index) {
+                var selectedClass = quizState.selectedIndex === index ? " selected" : "";
+                optionsHtml += "<button type='button' class='quiz-option" + selectedClass + "' data-index='" + index + "'><span>" + String.fromCharCode(65 + index) + "</span><strong>" + escapeHtml(option) + "</strong></button>";
+            });
+            $("#quizOptions").html(optionsHtml);
         }
 
         $(document).on("click", ".quiz-option", function () {
-        quizState.selectedIndex = parseInt($(this).data("index"));
-        $(".quiz-option").removeClass("selected");
-        $(this).addClass("selected");
-        $("#quizNextBtn").prop("disabled", false);
+            quizState.selectedIndex = parseInt($(this).data("index"));
+            $(".quiz-option").removeClass("selected");
+            $(this).addClass("selected");
+            $("#quizNextBtn").prop("disabled", false);
         });
 
         function renderQuizResult() {
-        var score = 0;
-        var reviewHtml = "";
+            var score = 0;
+            var reviewHtml = "";
 
-        quizState.questions.forEach(function (question, index) {
-        var userAnswer = quizState.answers[index];
-        var isCorrect = userAnswer === question.correctIndex;
-        if (isCorrect) {
-        score++;
-        }
+            quizState.questions.forEach(function (question, index) {
+                var userAnswer = quizState.answers[index];
+                var isCorrect = userAnswer === question.correctIndex;
+                if (isCorrect) {
+                    score++;
+                }
 
-        reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + "'>";
-        reviewHtml += "<strong>" + (index + 1) + ". " + escapeHtml(question.question) + "</strong>";
-        reviewHtml += "<div class='quiz-review-meta'><span>" + escapeHtml(question.difficulty || "Orta") + "</span><span>" + escapeHtml(question.bloomLevel || "Anlama") + "</span><span>" + escapeHtml(question.topic || "Doküman içeriği") + "</span></div>";
-        reviewHtml += "<p class='mb-1'>Senin cevabın: " + answerLabel(question, userAnswer) + "</p>";
-        reviewHtml += "<p class='mb-1'>Doğru cevap: " + answerLabel(question, question.correctIndex) + "</p>";
-        reviewHtml += "<small>" + escapeHtml(question.explanation || "") + "</small>";
-        if (question.whyWrong && question.whyWrong[userAnswer] && userAnswer !== question.correctIndex) {
-        reviewHtml += "<small class='d-block mt-1 text-muted'>Seçimin neden yanlış: " + escapeHtml(question.whyWrong[userAnswer]) + "</small>";
-        }
-        if (question.sourceHint) {
-        reviewHtml += "<small class='d-block mt-1 text-muted'>Kaynak ipucu: " + escapeHtml(question.sourceHint) + "</small>";
-        }
-        reviewHtml += "</div>";
-        });
+                reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + " position-relative shadow-sm'>";
+                reviewHtml += "<div class='position-absolute top-0 end-0 m-3 d-flex align-items-center gap-1'>" + getDifficultyDotHtml(question.difficulty) + "</div>";
+                reviewHtml += "<h6 class='fw-bold mb-2'>" + (index + 1) + ". " + escapeHtml(question.question) + "</h6>";
+                reviewHtml += "<div class='quiz-review-meta mb-2'><span>" + escapeHtml(question.difficulty || "Orta") + "</span><span>" + escapeHtml(question.bloomLevel || "Anlama") + "</span><span>" + escapeHtml(question.topic || "Doküman içeriği") + "</span></div>";
+
+                // Seçeneklerin Renkli Listesi (Doğru açık yeşil, Yanlış kırmızı)
+                reviewHtml += "<div class='my-2'>";
+                question.options.forEach(function (optText, optIdx) {
+                    var letter = String.fromCharCode(65 + optIdx);
+                    if (optIdx === question.correctIndex) {
+                        reviewHtml += "<div class='quiz-review-option correct-option'><span class='d-flex align-items-center gap-2'><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span> <span class='badge bg-success text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-check-circle-fill me-1'></i> Doğru Cevap</span></div>";
+                    } else if (optIdx === userAnswer && !isCorrect) {
+                        reviewHtml += "<div class='quiz-review-option wrong-option'><span class='d-flex align-items-center gap-2'><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span> <span class='badge bg-danger text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-x-circle-fill me-1'></i> Senin Yanlış Seçimin</span></div>";
+                    } else {
+                        reviewHtml += "<div class='quiz-review-option neutral-option'><span><strong>" + letter + ")</strong> " + escapeHtml(optText) + "</span></div>";
+                    }
+                });
+                reviewHtml += "</div>";
+
+                reviewHtml += "<div class='mt-2 p-2 rounded bg-white bg-opacity-60 border'>" +
+                              "<small class='d-block text-dark fw-bold'><i class='bi bi-info-circle me-1 text-primary'></i> AÇIKLAMA:</small>" +
+                              "<small class='text-secondary'>" + escapeHtml(question.explanation || "") + "</small>";
+
+                if (question.whyWrong && question.whyWrong[userAnswer] && userAnswer !== question.correctIndex) {
+                    reviewHtml += "<small class='d-block mt-1 text-danger fw-bold'><i class='bi bi-exclamation-triangle me-1'></i> Seçimin Neden Yanlış: " + escapeHtml(question.whyWrong[userAnswer]) + "</small>";
+                }
+                if (question.sourceHint) {
+                    reviewHtml += "<small class='d-block mt-1 text-muted'><i class='bi bi-search me-1'></i> Kaynak İpucu: " + escapeHtml(question.sourceHint) + "</small>";
+                }
+                reviewHtml += "</div>";
+                reviewHtml += "</div>";
+            });
 
         $("#quizQuestionArea").addClass("d-none");
         $("#quizResultArea").removeClass("d-none");
