@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using MiniLms.Models;
 using System.Collections.Generic;
 using System.Threading.Tasks;

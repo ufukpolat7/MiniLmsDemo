@@ -18,17 +18,20 @@ namespace MiniLms.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly IWebHostEnvironment _webHostEnvironment;
-        private readonly IVectorDbService _vectorDbService; // 🎯 YENİ: Vektör silme işlemleri için eklendi
+        private readonly IVectorDbService _vectorDbService;
+        private readonly IAiService? _aiService;
 
-        // Constructor güncellenerek IVectorDbService bağımlılığı enjekte edildi
+        // Constructor güncellenerek IVectorDbService ve IAiService bağımlılıkları enjekte edildi
         public CourseDocumentService(
             ApplicationDbContext context,
             IWebHostEnvironment webHostEnvironment,
-            IVectorDbService vectorDbService)
+            IVectorDbService vectorDbService,
+            IAiService? aiService = null)
         {
             _context = context;
             _webHostEnvironment = webHostEnvironment;
             _vectorDbService = vectorDbService;
+            _aiService = aiService;
         }
 
         public async Task SaveDocumentAsync(int courseId, IFormFile file)
@@ -186,8 +189,16 @@ namespace MiniLms.Services
                     .Where(content => content.ResourceUrl == document.FilePath && content.Type == "DocumentTopic")
                     .ToListAsync();
 
-                // Eğer eski gürültülü veya nokta başlığı içeren başlıklar varsa temizle ve yenile
-                bool needsRebuild = existingTopics.Count == 0 || existingTopics.Any(t => t.Text.StartsWith("Kaynak dokümandan") || t.Title.EndsWith(":") || t.Title.EndsWith(".") || t.Title.Contains("Doküman Konuları: ."));
+                // Eğer eski gürültülü veya yazar ismi / bitişik sözcük içeren başlıklar varsa temizle ve yenile
+                bool needsRebuild = existingTopics.Count == 0 || existingTopics.Any(t => 
+                    t.Text.StartsWith("Kaynak dokümandan") || 
+                    t.Title.EndsWith(":") || 
+                    t.Title.EndsWith(".") || 
+                    t.Title.Contains("Doküman Konuları: .") ||
+                    t.Title.Contains("Ali Gülbağ", StringComparison.OrdinalIgnoreCase) ||
+                    t.Text.Contains("Ali Gülbağ", StringComparison.OrdinalIgnoreCase) ||
+                    Regex.IsMatch(t.Title, @"Mantık\s+Devreleri", RegexOptions.IgnoreCase) ||
+                    Regex.IsMatch(t.Text, @"[a-zçğıöşü][A-ZÇĞİÖŞÜ]"));
 
                 if (!needsRebuild)
                 {
@@ -312,10 +323,16 @@ namespace MiniLms.Services
             await _context.SaveChangesAsync();
         }
 
+        public class TopicItem
+        {
+            public string Title { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
+        }
+
         private async Task AddDocumentTopicLessonAsync(int courseId, CourseDocument document, string extractedText)
         {
-            var topicHeadings = ExtractTopicHeadings(extractedText, document.FileName);
-            if (topicHeadings.Count == 0)
+            var topicItems = await ExtractTopicItemsAsync(extractedText, document.FileName);
+            if (topicItems == null || topicItems.Count == 0)
             {
                 return;
             }
@@ -347,23 +364,126 @@ namespace MiniLms.Services
             await _context.SaveChangesAsync();
 
             int order = 0;
-            foreach (string heading in topicHeadings)
+            foreach (var item in topicItems)
             {
                 order++;
-                string headingDesc = ExtractHeadingDescription(extractedText, heading);
-
                 await _context.LessonContents.AddAsync(new LessonContent
                 {
                     LessonId = topicLesson.Id,
-                    Title = $"{order}. {heading}",
-                    Text = headingDesc,
-                    Body = heading,
+                    Title = $"{order}. {item.Title}",
+                    Text = item.Description,
+                    Body = item.Title,
                     ResourceUrl = document.FilePath,
                     Order = order,
                     Type = "DocumentTopic",
                     IsIndexed = true
                 });
             }
+        }
+
+        private async Task<List<TopicItem>> ExtractTopicItemsAsync(string text, string fileName)
+        {
+            // 🎯 1. Yapay Zekâ (Gemini AI) ile Dokümandaki TÜM Konu Başlıklarını Eksiksiz Çıkar
+            if (_aiService != null && !string.IsNullOrWhiteSpace(text) && text.Length > 100)
+            {
+                try
+                {
+                    // Tüm PDF metnini taranması için metin boyutunu genişlet (35,000 karakter)
+                    string fullTextToScan = text.Length > 35000 ? text.Substring(0, 35000) : text;
+                    string prompt = $@"
+Aşağıdaki ders dokümanı metninde işlenen TÜM AKADEMİK DERS KONULARINI VE BÖLÜM BAŞLIKLARINI EKSİKSİZ ÇIKAR.
+Metnin başından sonuna kadar ele alınan NE KADAR KONU VARSA HEPSİNİ LİSTELE (konu adedi sınırlaması yoktur).
+
+Her konu için:
+- Temiz, kısa ve anlaşılır bir konu başlığı (Örn: 'Analog ve Sayısal Büyüklükler', 'Sayı Sistemleri ve Dönüşümler')
+- 1 cümlelik net Türkçe açıklama (Örn: 'İkilik ve onaltılık sayı sistemleri arasındaki dönüşüm adımları.')
+
+ZORUNLU KURALLAR:
+1. Başlıklarda veya açıklamalarda yazar adı (Ali Gülbağ, Zafer Cömert vb.), slayt başlık birleştirmeleri ('ANALOG-SAYISAL BÜYÜKLÜK...'), gürültü karakterler VEYA 'Doküman içeriğinden...' gibi genel jenerik ifadeler KESİNLİKLE OLMASIN.
+2. Kelimeler arasındaki boşluklar düzgün Türkçe kurallarına uygun olsun (bitişik kelimeler olmasın).
+3. Yalnızca aşağıdaki geçerli JSON formatında yanıt ver:
+
+[
+  {{ ""title"": ""Analog ve Sayısal Büyüklükler"", ""description"": ""Sayısal değerlerin voltaj seviyeleri ve 0-1 mantığı ile ifade edilme ilkeleri."" }},
+  {{ ""title"": ""Sayı Sistemleri ve Dönüşümler"", ""description"": ""Onluk, ikilik ve onaltılık sayı sistemleri arasındaki dönüşüm adımları."" }}
+]
+
+DERS METNİ:
+{fullTextToScan}
+";
+
+                    string aiResult = await _aiService.SummarizeTextAsync(prompt);
+                    if (!string.IsNullOrWhiteSpace(aiResult) && !aiResult.StartsWith("AI servisi hatası"))
+                    {
+                        var jsonMatch = Regex.Match(aiResult, @"\[[\s\S]*\]");
+                        if (jsonMatch.Success)
+                        {
+                            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<TopicItem>>(jsonMatch.Value, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (parsed != null && parsed.Count > 0)
+                            {
+                                var cleanList = parsed.Where(t => !string.IsNullOrWhiteSpace(t.Title) && t.Title.Length >= 3)
+                                                      .Select(t => new TopicItem
+                                                      {
+                                                          Title = CleanHeading(t.Title),
+                                                          Description = FixSquishedSpaces(t.Description)
+                                                      })
+                                                      .Where(t => !string.IsNullOrWhiteSpace(t.Title))
+                                                      .ToList(); // 🎯 Herhangi bir üst sınır (limit) koymadan tüm başlıkları al
+                                if (cleanList.Count > 0)
+                                {
+                                    return cleanList;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AiTopicExtraction Warning]: {ex.Message}");
+                }
+            }
+
+            // 🎯 2. Fallback: Gelişmiş Metin Temizleyici & Regex Ayrıştırıcısı
+            var topics = new List<TopicItem>();
+            string cleanedFullText = FixSquishedSpaces(text ?? string.Empty);
+            var headings = ExtractTopicHeadings(cleanedFullText, fileName);
+
+            foreach (string heading in headings)
+            {
+                string desc = ExtractHeadingDescription(cleanedFullText, heading);
+                topics.Add(new TopicItem
+                {
+                    Title = heading,
+                    Description = desc
+                });
+            }
+
+            return topics;
+        }
+
+        private static string FixSquishedSpaces(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+            string text = input;
+
+            // 1. PDF Slayt Yazar/Kurum isimleri gürültüsünü temizle
+            text = Regex.Replace(text, @"Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?", "", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"Zafer\s+Cömert", "", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"BTK\s+Akademi", "", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"Mantık\s+Devreleri", "", RegexOptions.IgnoreCase);
+
+            // 2. Bitişik kelimelerin arasına boşluk yerleştir
+            text = Regex.Replace(text, @"([a-zçğıöşü])([A-ZÇĞİÖŞÜ])", "$1 $2");
+            text = Regex.Replace(text, @"([a-zçğıöşü0-9])([•;:])", "$1 $2");
+            text = Regex.Replace(text, @"([•;:])([a-zçğıöşüA-ZÇĞİÖŞÜ])", "$1 $2");
+            text = Regex.Replace(text, @"•+", " • ");
+
+            // 3. Tekrarlanan ana başlık birleştirmelerini ve gürültüleri temizle
+            text = Regex.Replace(text, @"(ANALOG-SAYISAL BÜYÜKLÜK VE SAYI SİSTEMLERİ)\s*•?\s*", "", RegexOptions.IgnoreCase);
+
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+            return text;
         }
 
         private static string ExtractTextFromPdf(string filePath)
@@ -400,7 +520,7 @@ namespace MiniLms.Services
         {
             var topics = new List<string>();
 
-            string normalizedText = Regex.Replace(text ?? string.Empty, @"[ \t]+", " ");
+            string normalizedText = FixSquishedSpaces(text ?? string.Empty);
             var lines = normalizedText
                 .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(line => CleanHeading(line))
@@ -410,10 +530,6 @@ namespace MiniLms.Services
             foreach (string line in lines)
             {
                 AddTopic(topics, line);
-                if (topics.Count >= 12)
-                {
-                    return topics;
-                }
             }
 
             if (topics.Count < 3)
@@ -424,10 +540,6 @@ namespace MiniLms.Services
                     RegexOptions.IgnoreCase))
                 {
                     AddTopic(topics, CleanHeading(match.Groups[1].Value));
-                    if (topics.Count >= 12)
-                    {
-                        return topics;
-                    }
                 }
             }
 
@@ -443,13 +555,15 @@ namespace MiniLms.Services
         {
             if (string.IsNullOrWhiteSpace(fullText) || string.IsNullOrWhiteSpace(heading))
             {
-                return "İlgili dokümandan elde edilen ders konusu ve çalışma alanı.";
+                return "Dokümandaki kavramsal ders konusu ve çalışma alanı.";
             }
 
             int idx = fullText.IndexOf(heading, StringComparison.OrdinalIgnoreCase);
             if (idx >= 0)
             {
                 string afterText = fullText.Substring(idx + heading.Length).Trim();
+                afterText = FixSquishedSpaces(afterText);
+
                 var sentences = afterText.Split(new[] { '.', '!', '?', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                                          .Select(s => s.Trim())
                                          .Where(s => s.Length >= 15 && !s.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -466,22 +580,22 @@ namespace MiniLms.Services
                 }
             }
 
-            return "Doküman içeriğinden çıkarılan akademik ders başlığı ve inceleme konusu.";
+            return "Dokümandaki kavramsal ders konusu ve çalışma alanı.";
         }
 
         private static string CleanHeading(string heading)
         {
             if (string.IsNullOrWhiteSpace(heading)) return string.Empty;
 
-            heading = Regex.Replace(heading, @"\s+", " ").Trim();
+            heading = FixSquishedSpaces(heading);
             heading = Regex.Replace(heading, @"^[•\-–—*]+\s*", string.Empty).Trim();
             heading = Regex.Replace(heading, @"^\d+(\.\d+)*\.?\s*", string.Empty).Trim();
             heading = Regex.Replace(heading, @"\s+\.{2,}\s*\d+$", string.Empty).Trim();
-            heading = heading.Trim(':', '-', '–', '—', '.', ' ');
+            heading = heading.Trim(':', '-', '–', '—', '.', ' ', '•');
 
-            if (heading.Length > 90)
+            if (heading.Length > 85)
             {
-                heading = TruncateAtWord(heading, 85);
+                heading = TruncateAtWord(heading, 80);
             }
 
             return heading;
@@ -511,8 +625,8 @@ namespace MiniLms.Services
                 return false;
             }
 
-            // Slayt sunu gürültüsü ve açıklama cümlelerini filtrele
-            if (Regex.IsMatch(line, @"(slayt[ıa]?|omurgasını|vurgu|kullanıcıya|bu başlık|bu özet|şekil|tablo|page|sayfa|references|kaynakça)", RegexOptions.IgnoreCase))
+            // Slayt sunu gürültüsü ve yazar/sayfa üst yazısı kalıplarını filtrele
+            if (Regex.IsMatch(line, @"(slayt[ıa]?|omurgasını|vurgu|kullanıcıya|bu başlık|bu özet|şekil|tablo|page|sayfa|references|kaynakça|Ali\s+Gülbağ|Zafer\s+Cömert|BTK\s+Akademi)", RegexOptions.IgnoreCase))
             {
                 return false;
             }
