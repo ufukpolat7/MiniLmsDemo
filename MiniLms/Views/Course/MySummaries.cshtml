@@ -797,44 +797,66 @@
                 if (!rawText) return "";
                 var text = rawText;
                 
-                if (text.indexOf("<p>") !== -1 || text.indexOf("<strong>") !== -1 || text.indexOf("<h") !== -1) {
+                if (text.indexOf("<p>") !== -1 && text.indexOf("</p>") !== -1 && (text.indexOf("<strong>") !== -1 || text.indexOf("<h") !== -1 || text.indexOf("<ul>") !== -1)) {
                     text = text.replace(/<p>\s*#+\s*(.*?)\s*<\/p>/gi, '<h3 style="color: #0066ff !important; font-weight: 700 !important; font-size: 1.22rem; margin-top: 1.4rem; margin-bottom: 0.6rem;">$1</h3>');
                     text = text.replace(/<strong>(.*?)<\/strong>/gi, '<strong style="color: #000000 !important; font-weight: 700 !important;">$1<\/strong>');
                     return text;
                 }
 
-                var rawParagraphs = text.split(/\n\n+/);
+                // 1. Temizlik ve Satır Sonu Düzenlemeleri
+                text = text.replace(/\r\n/g, '\n');
+                text = text.replace(/Ali\s+Gülbağ(\s+Mantık\s+Devreleri)?/gi, '');
+                text = text.replace(/Zafer\s+Cömert/gi, '');
+                text = text.replace(/BTK\s+Akademi/gi, '');
+
+                // Bitişik kalmış madde işaretlerini (* Nereye..., - Temel..., 1. Adım...) yeni satıra ayır
+                text = text.replace(/([.!?])\s*([*\-•])\s*(\*\*)/g, '$1\n\n$2 $3');
+                text = text.replace(/([.!?])\s*(\d+\.\s+Adım)/gi, '$1\n\n### $2');
+
+                var rawBlocks = text.split(/\n\n+/);
                 var htmlBuilder = [];
 
-                rawParagraphs.forEach(function (p) {
-                    var trimmed = p.trim();
+                rawBlocks.forEach(function (block) {
+                    var trimmed = block.trim();
                     if (!trimmed) return;
 
-                    // 🎯 1. Mavi Başlık Tespiti (#, ##, ### ile Başlayanlar, Özel İfadeler VE Numaralı Yan Başlıklar)
-                    var startsWithHash = /^#+\s*/.test(trimmed);
-                    var isNumberedHeader = /^(?:\d+|\d+\.\d+|[A-Z])\.\s+[A-ZÇĞİÖŞÜ0-9]/i.test(trimmed) && trimmed.length < 90 && !/[.!?]$/.test(trimmed.replace(/^#+\s*/, '').trim());
-                    var isSpecialPhrase = /^(SINAV İÇİN DİKKAT EDİLMESİ GEREKEN NOKTALAR|DERS REHBERİ)/i.test(trimmed) && trimmed.length < 90;
+                    // 🎯 A. Başlık Tespiti:
+                    // - #, ##, ### ile başlayan başlıklar
+                    // - DERS REHBERİ, SINAV İÇİN... veya 📍 Adım Adım Çalışma Rehberi gibi kısa başlık cümleleri (< 75 karakter, nokta ile bitmeyen)
+                    var isExplicitHeader = /^#+\s*/.test(trimmed);
+                    var isShortTitle = /^(📍|SINAV İÇİN|DERS REHBERİ|Adım Adım Çalışma|Çalışma Yol Haritası)/i.test(trimmed) && trimmed.length < 75 && !/[.!?]$/.test(trimmed);
+                    var isNumberedHeading = /^(?:\d+|\d+\.\d+|[A-Z])\.\s+[A-ZÇĞİÖŞÜ0-9]/i.test(trimmed) && trimmed.length < 65 && !/[.!?]$/.test(trimmed.replace(/^#+\s*/, '').trim());
 
-                    var isHeading = startsWithHash || isNumberedHeader || isSpecialPhrase;
-
-                    if (isHeading) {
+                    if (isExplicitHeader || isShortTitle || isNumberedHeading) {
                         var cleanHeader = trimmed.replace(/^#+\s*/, '').replace(/\*\*/g, '').trim();
                         var isMainTitle = cleanHeader.toUpperCase().indexOf("DERS REHBERİ") !== -1;
 
                         if (isMainTitle) {
-                            htmlBuilder.push('<h2 style="color: #0066ff !important; font-weight: 800 !important; font-size: 1.35rem; margin-top: 1rem; margin-bottom: 0.8rem; text-transform: uppercase; line-height: 1.3;">' + escapeHtml(cleanHeader) + '</h2>');
+                            htmlBuilder.push('<h2 style="color: #0066ff !important; font-weight: 800 !important; font-size: 1.35rem; margin-top: 1.2rem; margin-bottom: 0.8rem; text-transform: uppercase; line-height: 1.3;">' + escapeHtml(cleanHeader) + '</h2>');
                         } else {
-                            htmlBuilder.push('<h3 style="color: #0066ff !important; font-weight: 700 !important; font-size: 1.2rem; margin-top: 1.4rem; margin-bottom: 0.6rem; display: block; line-height: 1.35;">' + escapeHtml(cleanHeader) + '</h3>');
+                            htmlBuilder.push('<h3 style="color: #0066ff !important; font-weight: 700 !important; font-size: 1.2rem; margin-top: 1.3rem; margin-bottom: 0.6rem; display: block; line-height: 1.35;">' + escapeHtml(cleanHeader) + '</h3>');
                         }
                     }
-                    // 🎯 2. Normal Gövde Metni -> Normal İnce Yazı (font-weight: 400), Önemli Kelimeler BOLD SİYAH
+                    // 🎯 B. Gövde Paragrafları veya Maddeli Listeler:
                     else {
-                        var formattedText = escapeHtml(trimmed);
-                        formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #000000 !important; font-weight: 700 !important;">$1</strong>');
-                        formattedText = formattedText.replace(/\*([^*]+)\*/g, '<em style="color: #334155; font-style: italic;">$1</em>');
-                        formattedText = formattedText.replace(/\n/g, '<br/>');
+                        var subLines = trimmed.split('\n');
+                        subLines.forEach(function(subLine) {
+                            var lineTrim = subLine.trim();
+                            if (!lineTrim) return;
 
-                        htmlBuilder.push('<p style="font-weight: 400 !important; color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 0.85rem;">' + formattedText + '</p>');
+                            var formatted = escapeHtml(lineTrim);
+                            // **bold kelimeler** -> BOLD SİYAH
+                            formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #000000 !important; font-weight: 700 !important;">$1</strong>');
+                            formatted = formatted.replace(/\*([^*]+)\*/g, '<em style="color: #334155; font-style: italic;">$1</em>');
+
+                            // Eğer madde işareti ile başlıyorsa (- veya * veya •)
+                            if (/^[*\-•]\s*/.test(lineTrim)) {
+                                formatted = formatted.replace(/^[*\-•]\s*/, '');
+                                htmlBuilder.push('<p style="font-weight: 400 !important; color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 0.5rem; margin-left: 0.8rem;">• ' + formatted + '</p>');
+                            } else {
+                                htmlBuilder.push('<p style="font-weight: 400 !important; color: #1e293b; font-size: 1.02rem; line-height: 1.65; margin-bottom: 0.85rem;">' + formatted + '</p>');
+                            }
+                        });
                     }
                 });
 
