@@ -117,6 +117,14 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE [DocumentSummaries] ADD [AudioFilePath] nvarchar(max) NULL;
             END;
 
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[CourseDocuments]') AND name = 'WeekNumber'
+            )
+            BEGIN
+                ALTER TABLE [CourseDocuments] ADD [WeekNumber] int NOT NULL DEFAULT 1;
+            END;
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = N'SavedQuizzes')
             BEGIN
                 CREATE TABLE [SavedQuizzes] (

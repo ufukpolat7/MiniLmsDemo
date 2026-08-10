@@ -227,10 +227,13 @@ namespace MiniLms.Services
             await _context.SaveChangesAsync();
         }
 
-        public async Task UploadDocumentAsync(int courseId, IFormFile file)
+        public async Task UploadDocumentAsync(int courseId, IFormFile file, int weekNumber = 1)
         {
             if (file == null || file.Length == 0)
                 throw new ArgumentException("Geçersiz dosya!");
+
+            if (weekNumber < 1) weekNumber = 1;
+            if (weekNumber > 14) weekNumber = 14;
 
             var courseExists = await _context.Courses.AnyAsync(c => c.Id == courseId);
             if (!courseExists)
@@ -270,28 +273,24 @@ namespace MiniLms.Services
                 CourseId = courseId,
                 FileName = file.FileName,
                 FilePath = "/uploads/" + uniqueFileName,
-                UploadedDate = DateTime.Now
+                UploadedDate = DateTime.Now,
+                WeekNumber = weekNumber
             };
 
             await _context.CourseDocuments.AddAsync(document);
-            await AddDocumentTopicLessonAsync(courseId, document, extractedText);
+            await AddDocumentTopicLessonAsync(courseId, document, extractedText, weekNumber);
 
             var lesson = await _context.Lessons
-                .Where(l => l.CourseId == courseId && l.Title == "Yüklenen Dokümanlar")
+                .Where(l => l.CourseId == courseId && l.WeekNumber == weekNumber && l.Title == "Yüklenen Dokümanlar")
                 .FirstOrDefaultAsync();
 
             if (lesson == null)
             {
-                int nextWeekNumber = await _context.Lessons
-                    .Where(l => l.CourseId == courseId)
-                    .Select(l => (int?)l.WeekNumber)
-                    .MaxAsync() ?? 0;
-
                 lesson = new Lesson
                 {
                     CourseId = courseId,
                     Title = "Yüklenen Dokümanlar",
-                    WeekNumber = nextWeekNumber + 1
+                    WeekNumber = weekNumber
                 };
 
                 await _context.Lessons.AddAsync(lesson);
@@ -323,24 +322,44 @@ namespace MiniLms.Services
             await _context.SaveChangesAsync();
         }
 
+        public async Task UpdateDocumentWeekAsync(int documentId, int weekNumber)
+        {
+            if (weekNumber < 1) weekNumber = 1;
+            if (weekNumber > 14) weekNumber = 14;
+
+            var document = await _context.CourseDocuments.FindAsync(documentId);
+            if (document != null)
+            {
+                document.WeekNumber = weekNumber;
+
+                // İlişkili konu derslerinin de haftasını güncelle
+                string rawFileName = Path.GetFileNameWithoutExtension(document.FileName);
+                var relatedLessons = await _context.Lessons
+                    .Where(l => l.CourseId == document.CourseId && (l.Title.Contains(rawFileName) || l.Contents.Any(c => c.ResourceUrl == document.FilePath)))
+                    .ToListAsync();
+
+                foreach (var lesson in relatedLessons)
+                {
+                    lesson.WeekNumber = weekNumber;
+                }
+
+                await _context.SaveChangesAsync();
+            }
+        }
+
         public class TopicItem
         {
             public string Title { get; set; } = string.Empty;
             public string Description { get; set; } = string.Empty;
         }
 
-        private async Task AddDocumentTopicLessonAsync(int courseId, CourseDocument document, string extractedText)
+        private async Task AddDocumentTopicLessonAsync(int courseId, CourseDocument document, string extractedText, int weekNumber = 1)
         {
             var topicItems = await ExtractTopicItemsAsync(extractedText, document.FileName);
             if (topicItems == null || topicItems.Count == 0)
             {
                 return;
             }
-
-            int nextWeekNumber = await _context.Lessons
-                .Where(l => l.CourseId == courseId && l.Title != "Yüklenen Dokümanlar")
-                .Select(l => (int?)l.WeekNumber)
-                .MaxAsync() ?? 0;
 
             string rawFileName = Path.GetFileNameWithoutExtension(document.FileName);
             string cleanDocName = rawFileName;
@@ -357,7 +376,7 @@ namespace MiniLms.Services
             {
                 CourseId = courseId,
                 Title = $"Doküman Konuları: {cleanDocName}",
-                WeekNumber = nextWeekNumber + 1
+                WeekNumber = weekNumber
             };
 
             await _context.Lessons.AddAsync(topicLesson);

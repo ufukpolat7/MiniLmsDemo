@@ -61,56 +61,126 @@
 
     <div class="row">
         <div class="col-lg-7 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-white py-3">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-calendar3-week text-primary"></i> Haftalık Ders İçerikleri</h5>
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-calendar3-week text-primary"></i> Haftalık Ders İçerikleri (1 - 14. Hafta)</h5>
+                    <span class="badge bg-primary-subtle text-primary border border-primary fs-7">1 Dönem = 14 Hafta</span>
                 </div>
-                <div class="card-body">
-                    @if (Model.Lessons != null && Model.Lessons.Any(l => l.Title != "Yüklenen Dokümanlar"))
-                    {
-                        <div class="accordion" id="lessonsAccordion">
-                            @foreach (var lesson in Model.Lessons.Where(l => l.Title != "Yüklenen Dokümanlar").OrderBy(l => l.WeekNumber))
-                            {
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header" id="heading-@lesson.Id">
-                                        <button class="accordion-button collapsed fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-@lesson.Id">
-                                            Hafta @lesson.WeekNumber: @lesson.Title
-                                        </button>
-                                    </h2>
-                                    <div id="collapse-@lesson.Id" class="accordion-collapse collapse" data-bs-parent="#lessonsAccordion">
-                                        <div class="accordion-body bg-white">
-                                            @if (lesson.Contents != null && lesson.Contents.Any())
+                <div class="card-body p-3">
+                    <div class="accordion" id="lessonsAccordion">
+                        @for (int w = 1; w <= 14; w++)
+                        {
+                            var currentWeek = w;
+                            var weekDocs = Model.Documents != null ? Model.Documents.Where(d => d.WeekNumber == currentWeek).ToList() : new List<MiniLms.Models.CourseDocument>();
+                            var weekLessons = Model.Lessons != null ? Model.Lessons.Where(l => l.WeekNumber == currentWeek).ToList() : new List<MiniLms.Models.Lesson>();
+                            var hasContent = weekDocs.Any() || weekLessons.Any(l => l.Contents != null && l.Contents.Any());
+
+                            <div class="accordion-item mb-2 border rounded overflow-hidden">
+                                <h2 class="accordion-header" id="heading-week-@currentWeek">
+                                    <button class="accordion-button @(currentWeek == 1 || hasContent ? "" : "collapsed") fw-bold py-3" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-week-@currentWeek">
+                                        <div class="d-flex align-items-center justify-content-between w-100 me-2">
+                                            <span><i class="bi bi-calendar-event text-primary me-2"></i> @currentWeek. Hafta İçerikleri</span>
+                                            @if (weekDocs.Any())
                                             {
-                                                @foreach (var content in lesson.Contents.OrderBy(c => c.Order))
-                                                {
-                                                    <div class="content-strip mb-2">
-                                                        <h6 class="fw-bold text-dark mb-1">@content.Title</h6>
-                                                        <p class="small text-muted mb-0">@content.Text</p>
-                                                    </div>
-                                                }
-                                            }
-                                            else
-                                            {
-                                                <p class="text-muted small mb-0">Bu haftaya ait henüz alt içerik eklenmemiş.</p>
+                                                <span class="badge bg-primary rounded-pill small ms-2">@weekDocs.Count Doküman</span>
                                             }
                                         </div>
+                                    </button>
+                                </h2>
+                                <div id="collapse-week-@currentWeek" class="accordion-collapse collapse @(currentWeek == 1 || hasContent ? "show" : "")" data-bs-parent="#lessonsAccordion">
+                                    <div class="accordion-body bg-light p-3">
+                                        @if (weekDocs.Any())
+                                        {
+                                            <div class="mb-3">
+                                                <h6 class="fw-bold text-secondary mb-2" style="font-size: 0.85rem;">
+                                                    <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @currentWeek. Haftaya Eklenen Dokümanlar ve Konu Başlıkları:
+                                                </h6>
+                                                @foreach (var doc in weekDocs)
+                                                {
+                                                    var rawName = System.IO.Path.GetFileNameWithoutExtension(doc.FileName);
+                                                    var docTopicLesson = weekLessons.FirstOrDefault(l => l.Title.Contains(rawName) || l.Title.StartsWith("Doküman Konuları"));
+                                                    
+                                                    <div class="card mb-3 border shadow-sm bg-white">
+                                                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-2 border-bottom">
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <i class="bi bi-file-earmark-text-fill text-primary fs-5"></i>
+                                                                <div>
+                                                                    <strong class="text-dark small d-block">@doc.FileName</strong>
+                                                                    <small class="text-muted" style="font-size: 11px;">⏱️ Yüklenme: @doc.UploadedDate.ToString("dd.MM.yyyy HH:mm")</small>
+                                                                </div>
+                                                            </div>
+                                                            <a href="@doc.FilePath" target="_blank" class="btn btn-xs btn-outline-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> İncele / Aç</a>
+                                                        </div>
+                                                        <div class="card-body p-3">
+                                                            <h6 class="fw-bold text-primary border-bottom pb-2 mb-2" style="font-size: 0.85rem;">
+                                                                <i class="bi bi-list-nested me-1"></i> Doküman İçerik ve Konu Başlıkları:
+                                                            </h6>
+                                                            @if (docTopicLesson != null && docTopicLesson.Contents != null && docTopicLesson.Contents.Any())
+                                                            {
+                                                                <div class="list-group list-group-flush">
+                                                                    @foreach (var content in docTopicLesson.Contents.Where(c => c.Type == "DocumentTopic").OrderBy(c => c.Order))
+                                                                    {
+                                                                        <div class="list-group-item px-0 py-2 bg-transparent border-bottom-0">
+                                                                            <div class="fw-bold text-dark small mb-1">
+                                                                                <i class="bi bi-check-circle-fill text-primary me-1" style="font-size: 11px;"></i> @content.Title
+                                                                            </div>
+                                                                            @if (!string.IsNullOrWhiteSpace(content.Text))
+                                                                            {
+                                                                                <div class="small text-muted ms-3" style="font-size: 0.82rem; line-height: 1.4;">
+                                                                                    @content.Text
+                                                                                </div>
+                                                                            }
+                                                                        </div>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <p class="small text-muted mb-0"><i class="bi bi-cpu me-1"></i> Bu doküman için yapay zekâ anlamsal indekslemesi tamamlanmıştır.</p>
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+
+                                        @if (weekLessons.Any(l => !l.Title.StartsWith("Doküman Konuları") && l.Title != "Yüklenen Dokümanlar"))
+                                        {
+                                            @foreach (var lesson in weekLessons.Where(l => !l.Title.StartsWith("Doküman Konuları") && l.Title != "Yüklenen Dokümanlar"))
+                                            {
+                                                <div class="card mb-2 border-0 bg-white shadow-sm p-3">
+                                                    <h6 class="fw-bold text-dark mb-2">@lesson.Title</h6>
+                                                    @if (lesson.Contents != null && lesson.Contents.Any())
+                                                    {
+                                                        foreach (var content in lesson.Contents.OrderBy(c => c.Order))
+                                                        {
+                                                            <div class="mb-2 ms-2">
+                                                                <strong class="small text-dark d-block">@content.Title</strong>
+                                                                <p class="small text-muted mb-0">@content.Text</p>
+                                                            </div>
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        }
+
+                                        @if (!hasContent)
+                                        {
+                                            <div class="text-center py-3 text-muted">
+                                                <small><i class="bi bi-info-circle me-1"></i> Bu haftaya ait henüz doküman yüklenmemiştir.</small>
+                                            </div>
+                                        }
                                     </div>
                                 </div>
-                            }
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="text-center py-5 text-muted">
-                            <p class="mb-0">Bu kursa ait henüz resmi haftalık müfredat konusu eklenmemiştir.</p>
-                        </div>
-                    }
+                            </div>
+                        }
+                    </div>
                 </div>
             </div>
         </div>
 
         <div class="col-lg-5">
-            <div class="card ai-panel mb-4">
+            <div class="card ai-panel mb-4 shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-cpu text-primary"></i> Dersin Yapay Zeka Asistanı</h5>
                     <span class="badge bg-light text-primary border fw-bold">Gemini + Qdrant</span>
@@ -138,17 +208,12 @@
                         <div id="audioPlayerContainer" class="p-3 mb-2 bg-white rounded border d-none shadow-sm">
                             <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
                                 <div class="d-flex align-items-center gap-2">
-                                    <!-- ⏪ 10 sn Geri -->
                                     <button type="button" id="btnRewind10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye Geri Al">
                                         <i class="bi bi-arrow-counterclockwise fs-6"></i>
                                     </button>
-
-                                    <!-- ▶️/⏸️ Oynat / Durdur -->
                                     <button type="button" id="btnPlayAudio" class="btn btn-sm btn-success rounded-circle shadow-sm" style="width:40px; height:40px; padding:0;" title="Oynat / Durdur">
                                         <i class="bi bi-play-fill fs-4"></i>
                                     </button>
-
-                                    <!-- ⏩ 10 sn İleri -->
                                     <button type="button" id="btnForward10" class="btn btn-sm btn-outline-secondary rounded-circle" style="width:34px; height:34px; padding:0;" title="10 Saniye İleri Al">
                                         <i class="bi bi-arrow-clockwise fs-6"></i>
                                     </button>
@@ -172,12 +237,10 @@
                                         <option value="2.0">2.0x</option>
                                     </select>
 
-                                    <!-- 🔄 Yeniden Ses Üret -->
                                     <button type="button" id="btnRefreshAudioSummary" class="btn btn-sm btn-outline-warning text-dark px-2" title="Yeniden Sesli Özet Üret">
                                         <i class="bi bi-arrow-repeat"></i> Yeniden Üret
                                     </button>
 
-                                    <!-- 🗑️ Sesi Sil -->
                                     <button type="button" id="btnDeleteAudioSummary" class="btn btn-sm btn-outline-danger px-2" title="Ses Kaydını Sil">
                                         <i class="bi bi-trash"></i> Sesi Sil
                                     </button>
@@ -186,7 +249,6 @@
                                 </div>
                             </div>
 
-                            <!-- 🎚️ İlerleme / Kaydırma Çubuğu (Seek Slider) -->
                             <div class="px-1">
                                 <input type="range" id="audioSeekBar" class="form-range" min="0" max="100" value="0" step="0.1" style="cursor: pointer;" />
                             </div>
@@ -194,7 +256,7 @@
                             <audio id="summaryAudioPlayer" class="w-100 mt-2 d-none" controls></audio>
                         </div>
 
-                        <div id="aiResponseText" class="text-dark" style="max-height: 400px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin;"></div>
+                        <div id="aiResponseText" class="lh-base" style="font-size: 0.95rem; max-height: 400px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin;"></div>
                     </div>
 
                     <form id="askAiForm">
@@ -208,7 +270,7 @@
                                 {
                                     foreach (var doc in Model.Documents)
                                     {
-                                        <option value="@doc.Id">@doc.FileName</option>
+                                        <option value="@doc.Id">[@doc.WeekNumber. Hafta] @doc.FileName</option>
                                     }
                                 }
                             </select>
@@ -222,7 +284,7 @@
                 </div>
             </div>
 
-            <div class="card mb-4">
+            <div class="card mb-4 shadow-sm">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-file-earmark-text text-primary"></i> Ek Ders Dokümanları</h5>
                     <span class="badge bg-light text-secondary border">@Model.Documents?.Count() Doküman</span>
@@ -235,17 +297,39 @@
                             {
                                 var existingSummary = savedSummaries.FirstOrDefault(s => s.CourseDocumentId == doc.Id);
                                 <div class="list-group-item d-flex justify-content-between align-items-center p-3">
-                                    <div class="text-truncate me-2" style="max-width: 55%;">
+                                    <div class="text-truncate me-2" style="max-width: 48%;">
                                         <div class="d-flex align-items-center gap-1">
+                                            <span class="badge bg-primary fw-bold" style="font-size: 10px;">@doc.WeekNumber. Hafta</span>
                                             <span class="fw-bold text-dark small d-block text-truncate">@doc.FileName</span>
                                             @if (existingSummary != null)
                                             {
                                                 <span class="badge bg-success-subtle text-success border border-success" style="font-size: 10px;" title="Kayıtlı Özet Mevcut">Özet Kayıtlı</span>
                                             }
                                         </div>
-                                        <small class="text-muted" style="font-size: 11px;">⏱️ @doc.UploadedDate.ToString("dd.MM.yyyy HH:mm")</small>
+                                        <small class="text-muted d-block" style="font-size: 11px;">⏱️ @doc.UploadedDate.ToString("dd.MM.yyyy HH:mm")</small>
                                     </div>
-                                    <div class="d-flex gap-1">
+                                    <div class="d-flex gap-1 align-items-center">
+                                        @if (User.IsInRole("Teacher"))
+                                        {
+                                            <form asp-action="UpdateDocumentWeek" method="post" class="d-inline">
+                                                <input type="hidden" name="id" value="@doc.Id" />
+                                                <input type="hidden" name="courseId" value="@Model.Id" />
+                                                <select name="weekNumber" class="form-select form-select-sm d-inline-block py-0 px-1 border-primary" style="width: auto; font-size: 11px;" onchange="this.form.submit()" title="Dokümanın Haftasını Değiştir">
+                                                    @for (int w = 1; w <= 14; w++)
+                                                    {
+                                                        if (doc.WeekNumber == w)
+                                                        {
+                                                            <option value="@w" selected="selected">Hafta @w</option>
+                                                        }
+                                                        else
+                                                        {
+                                                            <option value="@w">Hafta @w</option>
+                                                        }
+                                                    }
+                                                </select>
+                                            </form>
+                                        }
+
                                         <a href="@doc.FilePath" target="_blank" class="btn btn-xs btn-outline-primary btn-sm" title="Aç"><i class="bi bi-box-arrow-up-right"></i></a>
                                         
                                         @if (existingSummary != null)
@@ -282,7 +366,6 @@
 
             @if (User.IsInRole("Student"))
             {
-                <!-- 📌 ÖĞRENCİ PANELİ: KİŞİSEL DERS ÖZETLERİ -->
                 <div class="card mb-4 border-primary shadow-sm">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-3">
                         <h5 class="mb-0 fw-bold text-white"><i class="bi bi-journal-bookmark-fill"></i> Kaydedilmiş Ders Özetlerim</h5>
@@ -323,18 +406,29 @@
 
             @if (User.IsInRole("Teacher"))
             {
-                <div class="card mb-4">
+                <div class="card mb-4 shadow-sm border-warning border-2">
                     <div class="card-header bg-white fw-bold py-3">
                         <h5 class="mb-0 fw-bold"><i class="bi bi-cloud-arrow-up text-primary"></i> Bilgi Havuzuna Doküman Ekle</h5>
                     </div>
                     <div class="card-body">
                         <form asp-action="UploadDocument" method="post" enctype="multipart/form-data">
                             <input type="hidden" name="courseId" value="@Model.Id" />
+                            
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold text-dark"><i class="bi bi-calendar-range text-primary me-1"></i> Hangi Hafta İçin Yükleniyor? (1 Dönem = 14 Hafta)</label>
+                                <select name="weekNumber" class="form-select form-select-sm fw-bold border-primary" required>
+                                    @for (int w = 1; w <= 14; w++)
+                                    {
+                                        <option value="@w">@w. Hafta İçeriği Olarak Yükle</option>
+                                    }
+                                </select>
+                            </div>
+
                             <div class="mb-3">
                                 <label class="form-label small text-muted">Sistem otomatik olarak metin analizi yapıp indeksleme yapacaktır. (.pdf, .txt)</label>
                                 <input type="file" name="file" class="form-control form-control-sm" accept=".pdf,.txt" required />
                             </div>
-                            <button type="submit" class="btn btn-warning btn-sm w-100 fw-bold shadow-sm">Yükle ve İndeksle</button>
+                            <button type="submit" class="btn btn-warning btn-sm w-100 fw-bold shadow-sm"><i class="bi bi-cloud-upload"></i> Yükle ve @(Model.Title) Dersine İndeksle</button>
                         </form>
                     </div>
                 </div>

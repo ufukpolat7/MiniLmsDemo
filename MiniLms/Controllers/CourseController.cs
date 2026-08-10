@@ -210,7 +210,7 @@ namespace MiniLms.Controllers
         [Authorize(Policy = UserPolicies.TeacherOnly)]
         [RequestSizeLimit(104857600)]
         [RequestFormLimits(MultipartBodyLengthLimit = 104857600)]
-        public async Task<IActionResult> UploadDocument(int courseId, IFormFile file)
+        public async Task<IActionResult> UploadDocument(int courseId, IFormFile file, int weekNumber = 1)
         {
             if (file == null || file.Length == 0)
             {
@@ -219,12 +219,29 @@ namespace MiniLms.Controllers
 
             try
             {
-                await _courseDocumentService.UploadDocumentAsync(courseId, file);
-                TempData["SuccessMessage"] = "Doküman başarıyla yüklendi ve yapay zeka için indekslendi.";
+                await _courseDocumentService.UploadDocumentAsync(courseId, file, weekNumber);
+                TempData["SuccessMessage"] = $"Doküman {weekNumber}. Hafta için başarıyla yüklendi ve indekslendi.";
             }
             catch (Exception ex)
             {
                 TempData["ErrorMessage"] = $"Doküman yüklenirken hata oluştu: {ex.Message}";
+            }
+
+            return RedirectToAction("Details", new { id = courseId });
+        }
+
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        public async Task<IActionResult> UpdateDocumentWeek(int id, int courseId, int weekNumber)
+        {
+            try
+            {
+                await _courseDocumentService.UpdateDocumentWeekAsync(id, weekNumber);
+                TempData["SuccessMessage"] = $"Dokümanın ait olduğu hafta ({weekNumber}. Hafta) başarıyla güncellendi.";
+            }
+            catch (Exception ex)
+            {
+                TempData["ErrorMessage"] = $"Hafta güncellenirken hata oluştu: {ex.Message}";
             }
 
             return RedirectToAction("Details", new { id = courseId });

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace MiniLms.Models
 {
@@ -14,6 +14,9 @@ namespace MiniLms.Models
 
         // Dosyanın yüklenme tarihi
         public DateTime UploadedDate { get; set; } = DateTime.Now;
+
+        // 🎯 1-14 Hafta Seçimi: Bu doküman hangi haftaya ait?
+        public int WeekNumber { get; set; } = 1;
 
         // İlişki (Foreign Key): Bu doküman hangi derse ait?
         public int CourseId { get; set; }

@@ -18,7 +18,8 @@ namespace MiniLms.Interfaces
 
         // Dokümanı hem diskten hem DB'den siler
         Task DeleteDocumentAsync(int id);
-        Task UploadDocumentAsync(int courseId, IFormFile file);
+        Task UploadDocumentAsync(int courseId, IFormFile file, int weekNumber = 1);
+        Task UpdateDocumentWeekAsync(int documentId, int weekNumber);
         Task<List<string>> GetDocumentTextChunksAsync(int documentId, int maxChunks = 5);
         Task EnsureDocumentTopicLessonsAsync(int courseId);
     }
