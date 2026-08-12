@@ -1578,6 +1578,99 @@ DOKÜMAN METNİ:
             return View(gaps);
         }
 
+        // POST: Course/DeleteKnowledgeGapTopic (Öğrenci bir konuyu 'Öğrendim' olarak siler)
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> DeleteKnowledgeGapTopic([FromBody] DeleteTopicGapDto dto)
+        {
+            var userId = _userManager.GetUserId(User);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Json(new { success = false, message = "Oturum bulunamadı." });
+            }
+
+            var gaps = await _dbContext.StudentKnowledgeGaps
+                .Where(g => g.UserId == userId && g.CourseId == dto.CourseId)
+                .ToListAsync();
+
+            var itemsToDelete = gaps.Where(g => 
+                string.Equals(g.TopicName?.Trim(), dto.TopicName?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetSemanticTopicCluster(g.TopicName), dto.TopicName?.Trim(), StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+
+            if (!itemsToDelete.Any())
+            {
+                itemsToDelete = gaps.Where(g => g.TopicName != null && dto.TopicName != null && 
+                    g.TopicName.Contains(dto.TopicName, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            if (itemsToDelete.Any())
+            {
+                _dbContext.StudentKnowledgeGaps.RemoveRange(itemsToDelete);
+                await _dbContext.SaveChangesAsync();
+            }
+
+            return Json(new { success = true, deletedCount = itemsToDelete.Count });
+        }
+
+        // POST: Course/DeleteKnowledgeGapItem (Tekil soruyu siler)
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> DeleteKnowledgeGapItem([FromBody] DeleteGapItemDto dto)
+        {
+            var userId = _userManager.GetUserId(User);
+            var item = await _dbContext.StudentKnowledgeGaps
+                .FirstOrDefaultAsync(g => g.Id == dto.Id && g.UserId == userId);
+
+            if (item != null)
+            {
+                _dbContext.StudentKnowledgeGaps.Remove(item);
+                await _dbContext.SaveChangesAsync();
+                return Json(new { success = true });
+            }
+            return Json(new { success = false, message = "Kayıt bulunamadı." });
+        }
+
+        private string GetSemanticTopicCluster(string? rawTopic)
+        {
+            if (string.IsNullOrWhiteSpace(rawTopic)) return "Genel Ders Konuları";
+            string topic = rawTopic.Trim();
+
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bveri\s+ön\s*işlem", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Veri Ön İşleme Konuları";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bveri\s+sentez", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Veri Sentezi Konuları";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bveri\s+temizlem", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Veri Temizleme ve Düzenleme";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bveri\s+madencil", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Veri Madenciliği Temelleri";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bsayı\s+sistem", System.Text.RegularExpressions.RegexOptions.IgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(topic, @"\btümleyen\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Sayı Sistemleri ve Dönüşümler";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bmantık\s+kapı", System.Text.RegularExpressions.RegexOptions.IgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bkapılar\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Mantık Kapıları ve Devreler";
+            if (System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bağ\s+katman", System.Text.RegularExpressions.RegexOptions.IgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(topic, @"\bprotokol", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "Ağ Katmanı ve Protokolleri";
+
+            var words = topic.Split(new[] { ' ', '-', ':', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length >= 2)
+            {
+                return string.Join(" ", words.Take(2)) + " Konuları";
+            }
+
+            return topic;
+        }
+
+        public class DeleteTopicGapDto
+        {
+            public int CourseId { get; set; }
+            public string TopicName { get; set; } = string.Empty;
+        }
+
+        public class DeleteGapItemDto
+        {
+            public int Id { get; set; }
+        }
+
         public class RecordWrongAnswerDto
         {
             public int CourseId { get; set; }
