@@ -7,7 +7,9 @@ using MiniLms.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UglyToad.PdfPig;
@@ -246,9 +248,9 @@ namespace MiniLms.Services
             }
 
             string extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (extension != ".pdf" && extension != ".txt")
+            if (extension != ".pdf" && extension != ".txt" && extension != ".pptx" && extension != ".ppt")
             {
-                throw new InvalidOperationException("Sadece PDF veya TXT dosyası yükleyebilirsiniz.");
+                throw new InvalidOperationException("Sadece PDF, PPTX veya TXT dosyası yükleyebilirsiniz.");
             }
 
             string uniqueFileName = Guid.NewGuid() + "_" + Path.GetFileName(file.FileName);
@@ -261,7 +263,9 @@ namespace MiniLms.Services
 
             string extractedText = extension == ".pdf"
                 ? ExtractTextFromPdf(filePath)
-                : await File.ReadAllTextAsync(filePath);
+                : (extension == ".pptx" || extension == ".ppt")
+                    ? ExtractTextFromPptx(filePath)
+                    : await File.ReadAllTextAsync(filePath);
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
@@ -302,6 +306,8 @@ namespace MiniLms.Services
                 .Select(c => (int?)c.Order)
                 .MaxAsync() ?? 0;
 
+            string contentType = extension == ".pdf" ? "Pdf" : (extension == ".pptx" || extension == ".ppt" ? "Pptx" : "Text");
+
             foreach (string chunk in SplitText(extractedText, 3000))
             {
                 nextOrder++;
@@ -314,7 +320,7 @@ namespace MiniLms.Services
                     Body = chunk,
                     ResourceUrl = document.FilePath,
                     Order = nextOrder,
-                    Type = extension == ".pdf" ? "Pdf" : "Text",
+                    Type = contentType,
                     IsIndexed = false
                 });
             }
@@ -511,6 +517,53 @@ DERS METNİ:
             return string.Join(Environment.NewLine, document.GetPages().Select(page => page.Text));
         }
 
+        private static string ExtractTextFromPptx(string filePath)
+        {
+            var sb = new StringBuilder();
+            try
+            {
+                using var zip = ZipFile.OpenRead(filePath);
+
+                var slideEntries = zip.Entries
+                    .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.OrdinalIgnoreCase)
+                                && e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(e =>
+                    {
+                        var name = Path.GetFileNameWithoutExtension(e.Name);
+                        var match = Regex.Match(name, @"\d+");
+                        return match.Success && int.TryParse(match.Value, out int num) ? num : 999;
+                    });
+
+                int slideNum = 1;
+                foreach (var entry in slideEntries)
+                {
+                    using var stream = entry.Open();
+                    using var reader = new StreamReader(stream, Encoding.UTF8);
+                    string xmlContent = reader.ReadToEnd();
+
+                    var matches = Regex.Matches(xmlContent, @"<a:t[^>]*>(.*?)</a:t>", RegexOptions.Singleline);
+                    var slideTexts = matches
+                        .Select(m => System.Net.WebUtility.HtmlDecode(m.Groups[1].Value).Trim())
+                        .Where(t => !string.IsNullOrWhiteSpace(t));
+
+                    string slideCombinedText = string.Join(" ", slideTexts);
+                    if (!string.IsNullOrWhiteSpace(slideCombinedText))
+                    {
+                        sb.AppendLine($"[Slayt {slideNum}]");
+                        sb.AppendLine(slideCombinedText);
+                        sb.AppendLine();
+                    }
+                    slideNum++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExtractTextFromPptx Hata]: {ex.Message}");
+            }
+
+            return sb.ToString();
+        }
+
         private async Task<string> ReadDocumentTextAsync(CourseDocument document)
         {
             try
@@ -524,9 +577,11 @@ DERS METNİ:
                 string extension = Path.GetExtension(physicalPath).ToLowerInvariant();
                 return extension == ".pdf"
                     ? ExtractTextFromPdf(physicalPath)
-                    : extension == ".txt"
-                        ? await File.ReadAllTextAsync(physicalPath)
-                        : string.Empty;
+                    : (extension == ".pptx" || extension == ".ppt")
+                        ? ExtractTextFromPptx(physicalPath)
+                        : extension == ".txt"
+                            ? await File.ReadAllTextAsync(physicalPath)
+                            : string.Empty;
             }
             catch (Exception ex)
             {

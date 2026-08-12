@@ -103,7 +103,11 @@
                                                     <div class="card mb-3 border shadow-sm bg-white">
                                                         <div class="card-header bg-white d-flex justify-content-between align-items-center py-2 border-bottom">
                                                             <div class="d-flex align-items-center gap-2">
-                                                                <i class="bi bi-file-earmark-text-fill text-primary fs-5"></i>
+                                                                @{
+                                                                    var fileExt = System.IO.Path.GetExtension(doc.FileName).ToLowerInvariant();
+                                                                    var docIconClass = (fileExt == ".pptx" || fileExt == ".ppt") ? "bi-file-earmark-ppt-fill text-warning" : (fileExt == ".pdf" ? "bi-file-earmark-pdf-fill text-danger" : "bi-file-earmark-text-fill text-primary");
+                                                                }
+                                                                <i class="bi @docIconClass fs-5"></i>
                                                                 <div>
                                                                     <strong class="text-dark small d-block">@doc.FileName</strong>
                                                                     <small class="text-muted" style="font-size: 11px;">⏱️ Yüklenme: @doc.UploadedDate.ToString("dd.MM.yyyy HH:mm")</small>
@@ -425,8 +429,8 @@
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label small text-muted">Sistem otomatik olarak metin analizi yapıp indeksleme yapacaktır. (.pdf, .txt)</label>
-                                <input type="file" name="file" class="form-control form-control-sm" accept=".pdf,.txt" required />
+                                <label class="form-label small text-muted">Sistem otomatik olarak metin analizi yapıp indeksleme yapacaktır. (.pdf, .pptx, .txt)</label>
+                                <input type="file" name="file" class="form-control form-control-sm" accept=".pdf,.pptx,.ppt,.txt" required />
                             </div>
                             <button type="submit" class="btn btn-warning btn-sm w-100 fw-bold shadow-sm"><i class="bi bi-cloud-upload"></i> Yükle ve @(Model.Title) Dersine İndeksle</button>
                         </form>
