@@ -125,6 +125,14 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE [CourseDocuments] ADD [WeekNumber] int NOT NULL DEFAULT 1;
             END;
 
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[Courses]') AND name = 'TeacherId'
+            )
+            BEGIN
+                ALTER TABLE [Courses] ADD [TeacherId] nvarchar(450) NULL;
+            END;
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = N'SavedQuizzes')
             BEGIN
                 CREATE TABLE [SavedQuizzes] (

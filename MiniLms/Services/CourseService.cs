@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using MiniLms.Data;
 using MiniLms.Interfaces;
 using MiniLms.Models;
@@ -18,21 +18,35 @@ namespace MiniLms.Services
         }
 
         /// <summary>
-        /// Tüm kursları performans için AsNoTracking kullanarak listeler.
+        /// Tüm kursları sorumlu öğretmen bilgisiyle listeler.
         /// </summary>
         public async Task<IEnumerable<Course>> GetAllCoursesAsync()
         {
             return await _context.Courses
+                .Include(c => c.Teacher)
                 .AsNoTracking()
                 .ToListAsync();
         }
 
         /// <summary>
-        /// Belirli bir kursu; dersleri, ders içerikleri ve dökümanlarıyla birlikte tam dolu getirir.
+        /// Sadece belirli bir öğretmene ait veya henüz öğretmeni atanmamış genel kursları listeler.
+        /// </summary>
+        public async Task<IEnumerable<Course>> GetCoursesByTeacherIdAsync(string teacherId)
+        {
+            return await _context.Courses
+                .Include(c => c.Teacher)
+                .AsNoTracking()
+                .Where(c => c.TeacherId == teacherId || c.TeacherId == null)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Belirli bir kursu; öğretmeni, dersleri, ders içerikleri ve dökümanlarıyla birlikte tam dolu getirir.
         /// </summary>
         public async Task<Course?> GetCourseByIdAsync(int id)
         {
             return await _context.Courses
+                .Include(c => c.Teacher)
                 .Include(c => c.Lessons)                  // 1. İlişki: Kursa ait haftalık dersleri yükler
                     .ThenInclude(l => l.Contents)         // 2. İlişki: Derslerin altındaki haftalık içerikleri yükler
                 .Include(c => c.Documents)                // 🚀 3. İlişki: Arayüzde listelenmeyen dökümanları yükleyen kritik satır!

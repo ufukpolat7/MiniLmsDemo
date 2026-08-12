@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace MiniLms.Models
 {
@@ -17,9 +17,11 @@ namespace MiniLms.Models
         public int Credits { get; set; }
 
         // İlişki (Navigation Property)
+        public string? TeacherId { get; set; }
+        public ApplicationUser? Teacher { get; set; }
+
         public ICollection<Enrollment> Enrollments { get; set; } = new List<Enrollment>();
         public ICollection<CourseDocument> Documents { get; set; } = new List<CourseDocument>();
-       
         public ICollection<LessonContent> LessonContents { get; set; } = new List<LessonContent>();
     }
 }

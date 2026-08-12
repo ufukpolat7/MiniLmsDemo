@@ -46,10 +46,28 @@ namespace MiniLms.Controllers
             _userManager = userManager;
         }
 
-        // Tüm kursları ana sayfada listeler
+        // Öğretmen için kendi eklediği/atandığı dersleri, öğrenci için tüm dersleri listeler
         public async Task<IActionResult> Index()
         {
-            var courses = await _courseService.GetAllCoursesAsync();
+            IEnumerable<MiniLms.Models.Course> courses;
+
+            if (User.IsInRole("Teacher"))
+            {
+                var currentUserId = _userManager.GetUserId(User);
+                if (!string.IsNullOrEmpty(currentUserId))
+                {
+                    courses = await _courseService.GetCoursesByTeacherIdAsync(currentUserId);
+                }
+                else
+                {
+                    courses = await _courseService.GetAllCoursesAsync();
+                }
+            }
+            else
+            {
+                courses = await _courseService.GetAllCoursesAsync();
+            }
+
             return View(courses);
         }
 
@@ -69,8 +87,14 @@ namespace MiniLms.Controllers
         {
             if (ModelState.IsValid)
             {
+                var currentUserId = _userManager.GetUserId(User);
+                if (!string.IsNullOrEmpty(currentUserId))
+                {
+                    course.TeacherId = currentUserId; // 🎯 Dersi oluşturan öğretmeni kaydet
+                }
+
                 await _courseService.AddCourseAsync(course);
-                TempData["SuccessMessage"] = $"'{course.Title}' dersi başarıyla oluşturuldu.";
+                TempData["SuccessMessage"] = $"'{course.Title}' dersi başarıyla oluşturuldu ve hesabınıza tanımlandı.";
                 return RedirectToAction(nameof(Index));
             }
             return View(course);

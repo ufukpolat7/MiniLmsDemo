@@ -1,4 +1,4 @@
-﻿@model IEnumerable<MiniLms.Models.Course>
+@model IEnumerable<MiniLms.Models.Course>
 
 @{
     ViewData["Title"] = "Ders Listesi";
@@ -10,7 +10,16 @@
             <span class="hero-icon"><i class="bi bi-book-half"></i></span>
             <div>
                 <h1 class="page-title">Ders Listesi</h1>
-                <p class="page-subtitle">Açılan dersleri, kredileri ve ders kaynaklarını yönetin.</p>
+                <p class="page-subtitle">
+                    @if (User.IsInRole("Teacher"))
+                    {
+                        <span><i class="bi bi-person-badge text-primary me-1"></i> Hesabınıza tanımlı ve eklediğiniz dersler listelenmektedir.</span>
+                    }
+                    else
+                    {
+                        <span>Açılan dersleri, kredileri ve ders kaynaklarını yönetin.</span>
+                    }
+                </p>
             </div>
         </div>
         @if (User.IsInRole("Teacher"))
@@ -30,6 +39,7 @@
                     <tr>
                         <th>Ders Kodu</th>
                         <th>Ders Adı</th>
+                        <th>Sorumlu Öğretmen</th>
                         <th>Açıklama</th>
                         <th>Kredi</th>
                         <th class="text-center">İşlemler</th>
@@ -39,16 +49,24 @@
                     @if (!Model.Any())
                     {
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">Sistemde henüz açılmış bir ders bulunmamaktadır.</td>
+                            <td colspan="6" class="text-center text-muted py-4">Sistemde henüz atanmış veya eklenmiş bir ders bulunmamaktadır.</td>
                         </tr>
                     }
                     else
                     {
                         @foreach (var item in Model)
                         {
+                            var teacherName = item.Teacher != null ? $"{item.Teacher.FirstName} {item.Teacher.LastName}".Trim() : "Genel Müfredat";
+                            if (string.IsNullOrWhiteSpace(teacherName)) { teacherName = item.Teacher?.Email ?? "Genel Ders"; }
+
                             <tr>
                                 <td class="fw-bold text-danger">@item.CourseCode</td>
-                                <td>@item.Title</td>
+                                <td class="fw-bold text-dark">@item.Title</td>
+                                <td>
+                                    <span class="badge bg-primary-subtle text-primary border border-primary fw-bold px-2 py-1">
+                                        <i class="bi bi-person-badge me-1"></i> @teacherName
+                                    </span>
+                                </td>
                                 <td>@item.Description</td>
                                 <td><span class="badge bg-secondary">@item.Credits AKTS</span></td>
                                 <td class="text-center">
