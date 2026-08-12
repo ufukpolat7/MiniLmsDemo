@@ -1242,7 +1242,7 @@
         });
 
         $("#quizStartBtn").click(function () {
-        loadQuiz();
+            loadQuiz(true); // 🎯 Her seferinde yeni quiz üret (forceRefresh = true)
         });
 
         $("#quizNextBtn").click(function () {
@@ -1418,6 +1418,23 @@
                 var isCorrect = userAnswer === question.correctIndex;
                 if (isCorrect) {
                     score++;
+                } else {
+                    var selectedOptText = (userAnswer !== null && question.options && question.options[userAnswer]) ? question.options[userAnswer] : "Yanıtlanmadı";
+                    var correctOptText = (question.options && question.options[question.correctIndex]) ? question.options[question.correctIndex] : "";
+                    
+                    $.ajax({
+                        url: '@Url.Action("RecordWrongAnswer", "Course")',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            courseId: parseInt('@Model.Id'),
+                            courseDocumentId: parseInt(quizState.documentId || 0),
+                            questionText: question.question,
+                            selectedAnswer: selectedOptText,
+                            correctAnswer: correctOptText,
+                            topicName: question.topic || "Genel Konu"
+                        })
+                    });
                 }
 
                 reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + " position-relative shadow-sm'>";

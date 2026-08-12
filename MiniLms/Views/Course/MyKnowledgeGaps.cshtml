@@ -1,0 +1,204 @@
+@model IEnumerable<MiniLms.Models.StudentKnowledgeGap>
+
+@{
+    ViewData["Title"] = "Ders Bazlı Eksiklerim ve Yanlışlarım";
+    var courseGroups = Model.GroupBy(g => g.CourseId).ToList();
+}
+
+<div class="container py-4">
+    <!-- HERO BAŞLIK KARTI -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4 overflow-hidden" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);">
+        <div class="card-body p-4 text-white">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="p-3 rounded-3 bg-danger bg-opacity-20 text-danger-light fs-3">
+                        <i class="bi bi-journal-x text-danger"></i>
+                    </div>
+                    <div>
+                        <h2 class="fw-bold mb-1 text-white">Ders Bazlı Eksiklerim & Yanlışlarım</h2>
+                        <p class="text-white-50 mb-0 small">Çözdüğünüz quizlerdeki hatalarınız ders ders gruplanmıştır. İlgili derse tıklayarak zayıf konularınızı inceleyebilirsiniz.</p>
+                    </div>
+                </div>
+                <div>
+                    <a asp-action="Index" class="btn btn-outline-light btn-sm rounded-pill px-3"><i class="bi bi-arrow-left me-1"></i> Derslerime Dön</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!Model.Any())
+    {
+        <div class="card shadow-sm border-0 rounded-4 text-center py-5">
+            <div class="card-body p-5">
+                <div class="mb-3 text-success">
+                    <i class="bi bi-check-circle-fill display-2"></i>
+                </div>
+                <h4 class="fw-bold text-slate-800">Tebrikler! Kayıtlı Eksik Konunuz Bulunmuyor</h4>
+                <p class="text-muted mb-0">Quiz çözdükçe derslerinizdeki yanlış sorular ve eksik konular ders ders burada dinamik olarak raporlanacaktır.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- GENEL İSTATİSTİK BANTİ -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm rounded-3 p-3 bg-white d-flex flex-row align-items-center gap-3">
+                    <div class="p-3 rounded-circle bg-primary-subtle text-primary fs-4">
+                        <i class="bi bi-book-half"></i>
+                    </div>
+                    <div>
+                        <span class="text-muted small d-block">Eksik Bulunan Ders Sayısı</span>
+                        <strong class="fs-4 text-dark">@courseGroups.Count Ders</strong>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm rounded-3 p-3 bg-white d-flex flex-row align-items-center gap-3">
+                    <div class="p-3 rounded-circle bg-danger-subtle text-danger fs-4">
+                        <i class="bi bi-x-octagon-fill"></i>
+                    </div>
+                    <div>
+                        <span class="text-muted small d-block">Toplam Hatalı Cevap Kaydı</span>
+                        <strong class="fs-4 text-danger">@Model.Count() Soru Kaydı</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DERS BAZLI AKORDİYON LİSTESİ -->
+        <div class="accordion d-flex flex-column gap-3" id="courseGapsAccordion">
+            @foreach (var group in courseGroups)
+            {
+                var firstItem = group.First();
+                var course = firstItem.Course;
+                var courseTitle = course?.Title ?? "Bilinmeyen Ders";
+                var courseCode = course?.CourseCode ?? "DERS";
+                var totalWrongInCourse = group.Sum(g => g.WrongCount);
+                var courseId = firstItem.CourseId;
+
+                // Bu dersteki en çok zorlanılan top konular
+                var courseTopTopics = group.GroupBy(g => g.TopicName)
+                                           .OrderByDescending(g => g.Sum(x => x.WrongCount))
+                                           .Take(3)
+                                           .Select(g => new { Topic = g.Key, Count = g.Sum(x => x.WrongCount) });
+
+                <div class="accordion-item shadow-sm border-0 rounded-4 overflow-hidden mb-1">
+                    <!-- AKORDİYON BAŞLIĞI (DERS ADI VE İSTATİSTİK) -->
+                    <h2 class="accordion-header" id="heading-course-@courseId">
+                        <button class="accordion-button collapsed py-3 px-4 fw-bold bg-white text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-course-@courseId" aria-expanded="false" aria-controls="collapse-course-@courseId">
+                            <div class="d-flex justify-content-between align-items-center w-100 me-3 flex-wrap gap-2">
+                                <div class="d-flex align-items-center gap-3">
+                                    <span class="badge bg-indigo-subtle text-indigo border border-indigo fw-bold px-3 py-2 fs-7" style="background-color: #e0e7ff; color: #4338ca; border-color: #c7d2fe!important;">
+                                        <i class="bi bi-journal-text me-1"></i> @courseCode
+                                    </span>
+                                    <span class="fw-bold fs-5 text-slate-800">@courseTitle</span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle fw-bold px-3 py-2 rounded-pill">
+                                        <i class="bi bi-exclamation-circle me-1"></i> @totalWrongInCourse Hata Kaydı
+                                    </span>
+                                    <a asp-action="Details" asp-route-id="@firstItem.CourseId" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1">
+                                        <i class="bi bi-box-arrow-in-right me-1"></i> Derse Git
+                                    </a>
+                                </div>
+                            </div>
+                        </button>
+                    </h2>
+
+                    <!-- AKORDİYON İÇERİĞİ (TIKLANINCA AÇILIR) -->
+                    <div id="collapse-course-@courseId" class="accordion-collapse collapse" aria-labelledby="heading-course-@courseId" data-bs-parent="#courseGapsAccordion">
+                        <div class="accordion-body p-4" style="background-color: #f8fafc;">
+                            <div class="row g-4">
+                                <!-- SOL TARAF: YANLIŞ YAPILAN SORU KARTLARI -->
+                                <div class="col-lg-8">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <h6 class="fw-bold text-slate-700 mb-0">
+                                            <i class="bi bi-patch-question-fill text-danger me-1"></i> Yanlış Cevaplanan Sorular ve Seçenekler:
+                                        </h6>
+                                        <span class="badge bg-secondary-subtle text-secondary small">@group.Count() Farklı Soru</span>
+                                    </div>
+
+                                    <div class="d-flex flex-column gap-3 pe-2" style="max-height: 540px; overflow-y: auto; scrollbar-width: thin;">
+                                        @foreach (var gap in group)
+                                        {
+                                            <div class="card border-0 shadow-sm rounded-3 bg-white overflow-hidden flex-shrink-0" style="border-left: 4px solid #ef4444 !important;">
+                                                <div class="card-body p-3">
+                                                    <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
+                                                        <span class="badge bg-slate-100 text-slate-700 border small fw-semibold" style="background-color: #f1f5f9; color: #475569;">
+                                                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @(gap.Document?.FileName ?? "PDF Dokümanı")
+                                                        </span>
+                                                        <span class="badge bg-danger-subtle text-danger fw-bold rounded-pill px-2 py-1 small">
+                                                            <i class="bi bi-arrow-repeat me-1"></i> @gap.WrongCount Tekrar Hata
+                                                        </span>
+                                                    </div>
+
+                                                    <h6 class="fw-bold text-dark mb-3 leading-relaxed fs-6">@gap.QuestionText</h6>
+
+                                                    <!-- YANLIŞ VS DOĞRU CEVAP KUTULARI -->
+                                                    <div class="row g-2 mb-3">
+                                                        <div class="col-md-6">
+                                                            <div class="p-2.5 rounded-3 border border-danger-subtle p-2" style="background-color: #fef2f2;">
+                                                                <small class="d-block text-danger fw-bold mb-1 small" style="font-size: 0.75rem;">
+                                                                    <i class="bi bi-x-circle-fill me-1"></i> SİZİN SEÇİMİNİZ:
+                                                                </small>
+                                                                <span class="text-dark fw-semibold small">@gap.SelectedAnswer</span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="p-2.5 rounded-3 border border-success-subtle p-2" style="background-color: #f0fdf4;">
+                                                                <small class="d-block text-success fw-bold mb-1 small" style="font-size: 0.75rem;">
+                                                                    <i class="bi bi-check-circle-fill me-1"></i> DOĞRU CEVAP:
+                                                                </small>
+                                                                <span class="text-dark fw-semibold small">@gap.CorrectAnswer</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="d-flex justify-content-between align-items-center text-muted small pt-2 border-top" style="font-size: 0.8rem;">
+                                                        <span><i class="bi bi-tag-fill text-primary me-1"></i> Kök Konu: <strong class="text-dark">@gap.TopicName</strong></span>
+                                                        <span><i class="bi bi-clock-history me-1"></i> @gap.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+
+                                <!-- SAĞ TARAF: DERSE ÖZEL AKILLI İYİLEŞTİRME KARTI -->
+                                <div class="col-lg-4">
+                                    <div class="card border-0 shadow-sm rounded-3 bg-white h-100 position-sticky" style="top: 20px;">
+                                        <div class="card-header border-0 py-3 text-white rounded-top-3" style="background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);">
+                                            <h6 class="mb-0 fw-bold small"><i class="bi bi-stars me-1"></i> @courseCode Akıllı İyileştirme Rehberi</h6>
+                                        </div>
+                                        <div class="card-body p-3">
+                                            <h6 class="fw-bold text-dark fs-7 mb-2"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i> En Çok Zorlanılan Konular:</h6>
+                                            
+                                            <div class="d-flex flex-column gap-2 mb-3">
+                                                @foreach (var t in courseTopTopics)
+                                                {
+                                                    <div class="p-2 rounded-3 border border-danger-subtle d-flex justify-content-between align-items-center bg-white">
+                                                        <span class="fw-semibold text-dark small"><i class="bi bi-record-circle text-danger me-1"></i> @t.Topic</span>
+                                                        <span class="badge bg-danger text-white rounded-pill">@t.Count Hata</span>
+                                                    </div>
+                                                }
+                                            </div>
+
+                                            <div class="p-3 rounded-3 border border-primary-subtle bg-primary-subtle text-primary small">
+                                                <div class="fw-bold mb-1"><i class="bi bi-lightbulb-fill me-1 text-warning"></i> Nasıl Çalışmalısın?</div>
+                                                <p class="mb-0 text-secondary" style="font-size: 0.82rem; line-height: 1.5;">
+                                                    Bu dersteki eksiklerinizi kapatmak için <strong>@courseTopTopics.FirstOrDefault()?.Topic</strong> konusunun 
+                                                    sesli özetini dinleyebilir veya ders asistanına <em>"Bu konuda nelere dikkat etmeliyim?"</em> diye sorabilirsiniz.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>

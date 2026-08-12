@@ -22,6 +22,7 @@ namespace MiniLms.Data
         public DbSet<Student> Students { get; set; }
         public DbSet<DocumentSummary> DocumentSummaries { get; set; }
         public DbSet<SavedQuiz> SavedQuizzes { get; set; }
+        public DbSet<StudentKnowledgeGap> StudentKnowledgeGaps { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {

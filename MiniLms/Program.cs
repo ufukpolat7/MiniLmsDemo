@@ -148,6 +148,22 @@ using (var scope = app.Services.CreateScope())
                     [CreatedAt] datetime2 NOT NULL
                 );
             END;
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = N'StudentKnowledgeGaps')
+            BEGIN
+                CREATE TABLE [StudentKnowledgeGaps] (
+                    [Id] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    [UserId] nvarchar(450) NOT NULL,
+                    [CourseId] int NOT NULL,
+                    [CourseDocumentId] int NOT NULL,
+                    [QuestionText] nvarchar(max) NOT NULL,
+                    [SelectedAnswer] nvarchar(max) NOT NULL,
+                    [CorrectAnswer] nvarchar(max) NOT NULL,
+                    [TopicName] nvarchar(max) NOT NULL,
+                    [CreatedAt] datetime2 NOT NULL,
+                    [WrongCount] int NOT NULL DEFAULT 1
+                );
+            END;
         ");
     }
     catch (Exception ex)

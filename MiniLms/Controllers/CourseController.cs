@@ -887,13 +887,13 @@ DERS ÖZET METNİ:
 
         // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama ve Yeniden Üretme Destekli)
         [HttpGet]
-        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = false, int? quizId = null)
+        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = true, int? quizId = null)
         {
             try
             {
                 var userId = _userManager.GetUserId(User) ?? string.Empty;
 
-                // 🎯 1. Eğer belirli bir Quiz ID istendiyse, doğrudan veritabanından getir!
+                // 🎯 1. Eğer "Özel Özetlerim/Quizlerim" sayfasından belirli bir Quiz ID ile çağrıldıysa veritabanındaki o quizi getir!
                 if (quizId.HasValue && quizId.Value > 0)
                 {
                     var savedQuiz = await _dbContext.SavedQuizzes
@@ -924,7 +924,7 @@ DERS ÖZET METNİ:
                 questionCount = Math.Clamp(questionCount, 3, 10);
                 difficulty = NormalizeDifficulty(difficulty);
 
-                // 🎯 2. Eğer yenileme (forceRefresh) istenmediyse, veritabanında var olan en son kaydı kontrol et!
+                // 🎯 2. Ders detayından "Quiz Oluştur" dendiğinde varsayılan olarak HER SEFERİNDE YENİ QUİZ üretilir! (forceRefresh = true)
                 if (!forceRefresh)
                 {
                     var existingQuiz = await _dbContext.SavedQuizzes
@@ -1513,6 +1513,79 @@ DOKÜMAN METNİ:
             }
 
             return score;
+        }
+
+        // POST: Course/RecordWrongAnswer (Yanlış yapılan soruları veritabanına kaydeder)
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> RecordWrongAnswer([FromBody] RecordWrongAnswerDto dto)
+        {
+            if (dto == null || string.IsNullOrWhiteSpace(dto.QuestionText))
+            {
+                return BadRequest("Geçersiz veri.");
+            }
+
+            var userId = _userManager.GetUserId(User);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized();
+            }
+
+            var existingGap = await _dbContext.StudentKnowledgeGaps
+                .FirstOrDefaultAsync(g => g.UserId == userId && g.CourseId == dto.CourseId && g.QuestionText == dto.QuestionText);
+
+            if (existingGap != null)
+            {
+                existingGap.WrongCount++;
+                existingGap.CreatedAt = DateTime.Now;
+                existingGap.SelectedAnswer = dto.SelectedAnswer;
+            }
+            else
+            {
+                var newGap = new MiniLms.Models.StudentKnowledgeGap
+                {
+                    UserId = userId,
+                    CourseId = dto.CourseId,
+                    CourseDocumentId = dto.CourseDocumentId,
+                    QuestionText = dto.QuestionText,
+                    SelectedAnswer = dto.SelectedAnswer,
+                    CorrectAnswer = dto.CorrectAnswer,
+                    TopicName = string.IsNullOrWhiteSpace(dto.TopicName) ? "Genel Konu" : dto.TopicName,
+                    CreatedAt = DateTime.Now,
+                    WrongCount = 1
+                };
+                await _dbContext.StudentKnowledgeGaps.AddAsync(newGap);
+            }
+
+            await _dbContext.SaveChangesAsync();
+            return Json(new { success = true });
+        }
+
+        // GET: Course/MyKnowledgeGaps (Öğrencinin Yanlış Cevapladığı Sorular & Zayıf Konuları)
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> MyKnowledgeGaps()
+        {
+            var userId = _userManager.GetUserId(User);
+            var gaps = await _dbContext.StudentKnowledgeGaps
+                .Include(g => g.Course)
+                .Include(g => g.Document)
+                .Where(g => g.UserId == userId)
+                .OrderByDescending(g => g.WrongCount)
+                .ThenByDescending(g => g.CreatedAt)
+                .ToListAsync();
+
+            return View(gaps);
+        }
+
+        public class RecordWrongAnswerDto
+        {
+            public int CourseId { get; set; }
+            public int CourseDocumentId { get; set; }
+            public string QuestionText { get; set; } = string.Empty;
+            public string SelectedAnswer { get; set; } = string.Empty;
+            public string CorrectAnswer { get; set; } = string.Empty;
+            public string TopicName { get; set; } = string.Empty;
         }
 
         private class QuizQuestionDto
