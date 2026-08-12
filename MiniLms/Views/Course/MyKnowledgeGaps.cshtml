@@ -1,8 +1,50 @@
+@using System.Text.RegularExpressions
 @model IEnumerable<MiniLms.Models.StudentKnowledgeGap>
 
 @{
-    ViewData["Title"] = "Ders Bazlı Eksiklerim ve Yanlışlarım";
+    ViewData["Title"] = "Ders ve Konu Bazlı Eksiklerim";
     var courseGroups = Model.GroupBy(g => g.CourseId).ToList();
+
+    // 🎯 Benzer alaka ve anahtar kelimelere sahip konuları aynı kök grupta toplayan semantik kümeleyici
+    string GetSemanticTopicCluster(string rawTopic)
+    {
+        if (string.IsNullOrWhiteSpace(rawTopic)) return "Genel Ders Konuları";
+        
+        string topic = rawTopic.Trim();
+
+        // 1. Bilinen anahtar kalıplara göre semantik kümeleme
+        if (Regex.IsMatch(topic, @"\bveri\s+ön\s*işlem", RegexOptions.IgnoreCase))
+            return "Veri Ön İşleme Konuları";
+
+        if (Regex.IsMatch(topic, @"\bveri\s+sentez", RegexOptions.IgnoreCase))
+            return "Veri Sentezi Konuları";
+
+        if (Regex.IsMatch(topic, @"\bveri\s+temizlem", RegexOptions.IgnoreCase))
+            return "Veri Temizleme ve Düzenleme";
+
+        if (Regex.IsMatch(topic, @"\bveri\s+madencil", RegexOptions.IgnoreCase))
+            return "Veri Madenciliği Temelleri";
+
+        if (Regex.IsMatch(topic, @"\bsayı\s+sistem", RegexOptions.IgnoreCase) || Regex.IsMatch(topic, @"\btümleyen\b", RegexOptions.IgnoreCase))
+            return "Sayı Sistemleri ve Dönüşümler";
+
+        if (Regex.IsMatch(topic, @"\bmantık\s+kapı", RegexOptions.IgnoreCase) || Regex.IsMatch(topic, @"\bkapılar\b", RegexOptions.IgnoreCase))
+            return "Mantık Kapıları ve Devreler";
+
+        if (Regex.IsMatch(topic, @"\bağ\s+katman", RegexOptions.IgnoreCase) || Regex.IsMatch(topic, @"\bprotokol", RegexOptions.IgnoreCase))
+            return "Ağ Katmanı ve Protokolleri";
+
+        // 2. Genel kural: Cümlenin ilk 2 kelimesine göre kök konu grubu oluştur (Örn: "Karar Ağaçları...", "Özellik Seçimi...")
+        var words = topic.Split(new[] { ' ', '-', ':', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length >= 2)
+        {
+            return string.Join(" ", words.Take(2)) + " Konuları";
+        }
+
+        return topic;
+    }
+
+    int topicCounter = 0;
 }
 
 <div class="container py-4">
@@ -15,8 +57,8 @@
                         <i class="bi bi-journal-x text-danger"></i>
                     </div>
                     <div>
-                        <h2 class="fw-bold mb-1 text-white">Ders Bazlı Eksiklerim & Yanlışlarım</h2>
-                        <p class="text-white-50 mb-0 small">Çözdüğünüz quizlerdeki hatalarınız ders ders gruplanmıştır. İlgili derse tıklayarak zayıf konularınızı inceleyebilirsiniz.</p>
+                        <h2 class="fw-bold mb-1 text-white">Ders ve Konu Grubu Bazlı Eksiklerim</h2>
+                        <p class="text-white-50 mb-0 small">Yanlış yaptığınız sorular <strong>konularına göre gruplanmıştır</strong>. Konu başlığına veya soruya tıklayarak detayları açabilirsiniz.</p>
                     </div>
                 </div>
                 <div>
@@ -34,7 +76,7 @@
                     <i class="bi bi-check-circle-fill display-2"></i>
                 </div>
                 <h4 class="fw-bold text-slate-800">Tebrikler! Kayıtlı Eksik Konunuz Bulunmuyor</h4>
-                <p class="text-muted mb-0">Quiz çözdükçe derslerinizdeki yanlış sorular ve eksik konular ders ders burada dinamik olarak raporlanacaktır.</p>
+                <p class="text-muted mb-0">Quiz çözdükçe derslerinizdeki yanlış sorular ve benzer konular otomatik olarak burada gruplanacaktır.</p>
             </div>
         </div>
     }
@@ -77,11 +119,12 @@
                 var totalWrongInCourse = group.Sum(g => g.WrongCount);
                 var courseId = firstItem.CourseId;
 
-                // Bu dersteki en çok zorlanılan top konular
-                var courseTopTopics = group.GroupBy(g => g.TopicName)
-                                           .OrderByDescending(g => g.Sum(x => x.WrongCount))
-                                           .Take(3)
-                                           .Select(g => new { Topic = g.Key, Count = g.Sum(x => x.WrongCount) });
+                // 🎯 Semantik Konu Kümeleme
+                var topicGroups = group.GroupBy(g => GetSemanticTopicCluster(g.TopicName))
+                                       .OrderByDescending(tg => tg.Sum(x => x.WrongCount))
+                                       .ToList();
+
+                var courseTopTopics = topicGroups.Take(3).Select(g => new { Topic = g.Key, Count = g.Sum(x => x.WrongCount) });
 
                 <div class="accordion-item shadow-sm border-0 rounded-4 overflow-hidden mb-1">
                     <!-- AKORDİYON BAŞLIĞI (DERS ADI VE İSTATİSTİK) -->
@@ -95,6 +138,9 @@
                                     <span class="fw-bold fs-5 text-slate-800">@courseTitle</span>
                                 </div>
                                 <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle fw-bold px-2.5 py-1.5 rounded-pill small">
+                                        <i class="bi bi-layers-fill me-1"></i> @topicGroups.Count Semantik Konu Grubu
+                                    </span>
                                     <span class="badge bg-danger-subtle text-danger border border-danger-subtle fw-bold px-3 py-2 rounded-pill">
                                         <i class="bi bi-exclamation-circle me-1"></i> @totalWrongInCourse Hata Kaydı
                                     </span>
@@ -110,54 +156,103 @@
                     <div id="collapse-course-@courseId" class="accordion-collapse collapse" aria-labelledby="heading-course-@courseId" data-bs-parent="#courseGapsAccordion">
                         <div class="accordion-body p-4" style="background-color: #f8fafc;">
                             <div class="row g-4">
-                                <!-- SOL TARAF: YANLIŞ YAPILAN SORU KARTLARI -->
+                                <!-- SOL TARAF: BENZER KONULARINA VE SORULARA GÖRE İÇ İÇE TIKLANABİLİR LİSTE -->
                                 <div class="col-lg-8">
                                     <div class="d-flex align-items-center justify-content-between mb-3">
                                         <h6 class="fw-bold text-slate-700 mb-0">
-                                            <i class="bi bi-patch-question-fill text-danger me-1"></i> Yanlış Cevaplanan Sorular ve Seçenekler:
+                                            <i class="bi bi-diagram-3-fill text-primary me-1"></i> Konu Grupları (Genişletmek için konuya veya soruya tıklayın):
                                         </h6>
-                                        <span class="badge bg-secondary-subtle text-secondary small">@group.Count() Farklı Soru</span>
+                                        <span class="badge bg-secondary-subtle text-secondary small">@topicGroups.Count Konu Kümesi / @group.Count() Soru</span>
                                     </div>
 
-                                    <div class="d-flex flex-column gap-3 pe-2" style="max-height: 540px; overflow-y: auto; scrollbar-width: thin;">
-                                        @foreach (var gap in group)
+                                    <!-- SCROLL EDİLEBİLİR KONU & SORU LİSTESİ -->
+                                    <div class="d-flex flex-column gap-3 pe-2" style="max-height: 580px; overflow-y: auto; scrollbar-width: thin;">
+                                        @foreach (var topicGroup in topicGroups)
                                         {
-                                            <div class="card border-0 shadow-sm rounded-3 bg-white overflow-hidden flex-shrink-0" style="border-left: 4px solid #ef4444 !important;">
-                                                <div class="card-body p-3">
-                                                    <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
-                                                        <span class="badge bg-slate-100 text-slate-700 border small fw-semibold" style="background-color: #f1f5f9; color: #475569;">
-                                                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @(gap.Document?.FileName ?? "PDF Dokümanı")
-                                                        </span>
-                                                        <span class="badge bg-danger-subtle text-danger fw-bold rounded-pill px-2 py-1 small">
-                                                            <i class="bi bi-arrow-repeat me-1"></i> @gap.WrongCount Tekrar Hata
-                                                        </span>
+                                            topicCounter++;
+                                            var topicClusterName = topicGroup.Key;
+                                            var wrongCountInTopic = topicGroup.Sum(x => x.WrongCount);
+
+                                            <div class="card border border-primary-subtle shadow-sm rounded-3 bg-white overflow-hidden flex-shrink-0">
+                                                <!-- SEMANTİK KONU GRUBU BAŞLIĞI (TIKLANABİLİR AKORDİYON) -->
+                                                <div class="card-header py-2.5 px-3 bg-primary bg-opacity-10 border-bottom border-primary-subtle d-flex justify-content-between align-items-center"
+                                                     style="cursor: pointer;"
+                                                     data-bs-toggle="collapse"
+                                                     data-bs-target="#topic-collapse-@topicCounter">
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <i class="bi bi-folder-fill text-primary fs-6"></i>
+                                                        <strong class="text-primary-emphasis fs-6">@topicClusterName</strong>
                                                     </div>
-
-                                                    <h6 class="fw-bold text-dark mb-3 leading-relaxed fs-6">@gap.QuestionText</h6>
-
-                                                    <!-- YANLIŞ VS DOĞRU CEVAP KUTULARI -->
-                                                    <div class="row g-2 mb-3">
-                                                        <div class="col-md-6">
-                                                            <div class="p-2.5 rounded-3 border border-danger-subtle p-2" style="background-color: #fef2f2;">
-                                                                <small class="d-block text-danger fw-bold mb-1 small" style="font-size: 0.75rem;">
-                                                                    <i class="bi bi-x-circle-fill me-1"></i> SİZİN SEÇİMİNİZ:
-                                                                </small>
-                                                                <span class="text-dark fw-semibold small">@gap.SelectedAnswer</span>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-md-6">
-                                                            <div class="p-2.5 rounded-3 border border-success-subtle p-2" style="background-color: #f0fdf4;">
-                                                                <small class="d-block text-success fw-bold mb-1 small" style="font-size: 0.75rem;">
-                                                                    <i class="bi bi-check-circle-fill me-1"></i> DOĞRU CEVAP:
-                                                                </small>
-                                                                <span class="text-dark fw-semibold small">@gap.CorrectAnswer</span>
-                                                            </div>
-                                                        </div>
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 small">
+                                                            @topicGroup.Count() Soru / @wrongCountInTopic Hata
+                                                        </span>
+                                                        <i class="bi bi-chevron-down text-primary small"></i>
                                                     </div>
+                                                </div>
 
-                                                    <div class="d-flex justify-content-between align-items-center text-muted small pt-2 border-top" style="font-size: 0.8rem;">
-                                                        <span><i class="bi bi-tag-fill text-primary me-1"></i> Kök Konu: <strong class="text-dark">@gap.TopicName</strong></span>
-                                                        <span><i class="bi bi-clock-history me-1"></i> @gap.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                                                <!-- KONU İÇİNDEKİ TIKLANABİLİR SORULAR LİSTESİ (VARSAYILAN OLARAK KAPALI) -->
+                                                <div id="topic-collapse-@topicCounter" class="collapse">
+                                                    <div class="card-body p-3 d-flex flex-column gap-2">
+                                                        @foreach (var gap in topicGroup)
+                                                        {
+                                                            <div class="border rounded-3 bg-white overflow-hidden shadow-sm">
+                                                                <!-- HER BİR SORU BAŞLIĞI (TIKLANINCA CEVAP AÇILIR) -->
+                                                                <div class="p-3 bg-light border-bottom d-flex justify-content-between align-items-center"
+                                                                     style="cursor: pointer;"
+                                                                     data-bs-toggle="collapse"
+                                                                     data-bs-target="#question-collapse-@gap.Id">
+                                                                    <div class="d-flex align-items-center gap-2 overflow-hidden me-2">
+                                                                        <span class="badge bg-slate-200 text-slate-700 border small fw-semibold flex-shrink-0" style="background-color: #e2e8f0; color: #334155;">
+                                                                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i> @(gap.Document?.FileName ?? "PDF")
+                                                                        </span>
+                                                                        <span class="fw-bold text-dark fs-6 text-truncate">
+                                                                            <i class="bi bi-question-circle-fill text-danger me-1"></i> @gap.QuestionText
+                                                                        </span>
+                                                                    </div>
+                                                                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                                        <span class="badge bg-danger-subtle text-danger fw-bold rounded-pill px-2 py-1 small" style="font-size: 0.73rem;">
+                                                                            <i class="bi bi-arrow-repeat me-1"></i> @gap.WrongCount Hata
+                                                                        </span>
+                                                                        <i class="bi bi-chevron-down text-secondary small"></i>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- TIKLANINCA AÇILAN DETAYLI SORU & CEVAP GÖVDESİ -->
+                                                                <div id="question-collapse-@gap.Id" class="collapse">
+                                                                    <div class="p-3 bg-white">
+                                                                        <div class="mb-3 p-2 rounded bg-slate-100 border text-slate-800 fw-bold" style="background-color: #f1f5f9; font-size: 0.9rem;">
+                                                                            <i class="bi bi-patch-question-fill text-danger me-1"></i> @gap.QuestionText
+                                                                        </div>
+
+                                                                        <!-- YANLIŞ VS DOĞRU CEVAP KUTULARI -->
+                                                                        <div class="row g-2 mb-2">
+                                                                            <div class="col-md-6">
+                                                                                <div class="p-2.5 rounded-3 border border-danger-subtle" style="background-color: #fef2f2;">
+                                                                                    <small class="d-block text-danger fw-bold mb-1" style="font-size: 0.72rem;">
+                                                                                        <i class="bi bi-x-circle-fill me-1"></i> SİZİN SEÇİMİNİZ:
+                                                                                    </small>
+                                                                                    <span class="text-dark fw-semibold small">@gap.SelectedAnswer</span>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div class="col-md-6">
+                                                                                <div class="p-2.5 rounded-3 border border-success-subtle" style="background-color: #f0fdf4;">
+                                                                                    <small class="d-block text-success fw-bold mb-1" style="font-size: 0.72rem;">
+                                                                                        <i class="bi bi-check-circle-fill me-1"></i> DOĞRU CEVAP:
+                                                                                    </small>
+                                                                                    <span class="text-dark fw-semibold small">@gap.CorrectAnswer</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        <div class="d-flex justify-content-between align-items-center text-muted small pt-2 border-top" style="font-size: 0.78rem;">
+                                                                            <span><i class="bi bi-tag-fill text-primary me-1"></i> Özel Konu: <strong class="text-dark">@gap.TopicName</strong></span>
+                                                                            <span><i class="bi bi-clock-history me-1"></i> Kayıt: @gap.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        }
                                                     </div>
                                                 </div>
                                             </div>
@@ -172,23 +267,22 @@
                                             <h6 class="mb-0 fw-bold small"><i class="bi bi-stars me-1"></i> @courseCode Akıllı İyileştirme Rehberi</h6>
                                         </div>
                                         <div class="card-body p-3">
-                                            <h6 class="fw-bold text-dark fs-7 mb-2"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i> En Çok Zorlanılan Konular:</h6>
+                                            <h6 class="fw-bold text-dark fs-7 mb-2"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i> En Çok Zorlanılan Konu Grupları:</h6>
                                             
                                             <div class="d-flex flex-column gap-2 mb-3">
                                                 @foreach (var t in courseTopTopics)
                                                 {
                                                     <div class="p-2 rounded-3 border border-danger-subtle d-flex justify-content-between align-items-center bg-white">
-                                                        <span class="fw-semibold text-dark small"><i class="bi bi-record-circle text-danger me-1"></i> @t.Topic</span>
+                                                        <span class="fw-semibold text-dark small"><i class="bi bi-folder-fill text-danger me-1"></i> @t.Topic</span>
                                                         <span class="badge bg-danger text-white rounded-pill">@t.Count Hata</span>
                                                     </div>
                                                 }
                                             </div>
 
                                             <div class="p-3 rounded-3 border border-primary-subtle bg-primary-subtle text-primary small">
-                                                <div class="fw-bold mb-1"><i class="bi bi-lightbulb-fill me-1 text-warning"></i> Nasıl Çalışmalısın?</div>
+                                                <div class="fw-bold mb-1"><i class="bi bi-lightbulb-fill me-1 text-warning"></i> Tavsiye Olunan Adım:</div>
                                                 <p class="mb-0 text-secondary" style="font-size: 0.82rem; line-height: 1.5;">
-                                                    Bu dersteki eksiklerinizi kapatmak için <strong>@courseTopTopics.FirstOrDefault()?.Topic</strong> konusunun 
-                                                    sesli özetini dinleyebilir veya ders asistanına <em>"Bu konuda nelere dikkat etmeliyim?"</em> diye sorabilirsiniz.
+                                                    Bu derste en çok hata yaptığınız <strong>@courseTopTopics.FirstOrDefault()?.Topic</strong> kümesindeki konuları kapatmak için ders sayfasına gidip sesli özeti dinleyebilirsiniz.
                                                 </p>
                                             </div>
                                         </div>
