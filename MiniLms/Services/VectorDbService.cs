@@ -12,26 +12,33 @@ namespace MiniLms.Services
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<VectorDbService> _logger;
+        private readonly string _baseUrl;
+        private readonly string? _apiKey;
 
-        private const string QdrantBaseUrl = "http://localhost:6333";
-        
-
-        public VectorDbService(HttpClient httpClient, ILogger<VectorDbService> logger
-            )
+        public VectorDbService(HttpClient httpClient, ILogger<VectorDbService> logger, Microsoft.Extensions.Configuration.IConfiguration configuration)
         {
             _httpClient = httpClient;
             _logger = logger;
+            
+            _baseUrl = (configuration["Qdrant:Url"] ?? "http://localhost:6333").TrimEnd('/');
+            _apiKey = configuration["Qdrant:ApiKey"];
+
+            if (!string.IsNullOrWhiteSpace(_apiKey) && !_httpClient.DefaultRequestHeaders.Contains("api-key"))
+            {
+                _httpClient.DefaultRequestHeaders.Add("api-key", _apiKey);
+            }
         }
+
         public async Task<bool> DeleteVectorAsync(string pointId)
         {
             try
             {
                 // Qdrant API'sine ilgili pointId için DELETE isteği atılır
-                string url = $"http://localhost:6333/collections/MiniLmsCollection/points/delete";
+                string url = $"{_baseUrl}/collections/MiniLmsCollection/points/delete";
                 var payload = new { points = new[] { pointId } };
 
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(url, content); // Qdrant delete endpoint'i genellikle POST veya DELETE kabul eder
+                var response = await _httpClient.PostAsync(url, content);
 
                 return response.IsSuccessStatusCode;
             }
@@ -44,7 +51,7 @@ namespace MiniLms.Services
 
         public async Task EnsureCollectionExistsAsync(string collectionName)
         {
-            var checkResponse = await _httpClient.GetAsync($"{QdrantBaseUrl}/collections/{collectionName}");
+            var checkResponse = await _httpClient.GetAsync($"{_baseUrl}/collections/{collectionName}");
             if (checkResponse.IsSuccessStatusCode) return; // Koleksiyon zaten var
 
             // Gemini embedding modeli 768 boyutludur ve mesafe ölçümü için Cosine en idealidir
@@ -54,7 +61,7 @@ namespace MiniLms.Services
             };
 
             var content = new StringContent(JsonSerializer.Serialize(createPayload), Encoding.UTF8, "application/json");
-            await _httpClient.PutAsync($"{QdrantBaseUrl}/collections/{collectionName}", content);
+            await _httpClient.PutAsync($"{_baseUrl}/collections/{collectionName}", content);
         }
 
         public async Task SaveVectorAsync(string collectionName, int contentId, int lessonId, List<float> vector, string originalText)
@@ -80,7 +87,7 @@ namespace MiniLms.Services
             };
 
             var content = new StringContent(JsonSerializer.Serialize(uploadPayload), Encoding.UTF8, "application/json");
-            await _httpClient.PostAsync($"{QdrantBaseUrl}/collections/{collectionName}/points?wait=true", content);
+            await _httpClient.PostAsync($"{_baseUrl}/collections/{collectionName}/points?wait=true", content);
         }
 
         public async Task<List<string>> SearchSimilarTextsAsync(string collectionName, List<float> vectorData, int limit = 3)
@@ -88,7 +95,7 @@ namespace MiniLms.Services
             try
             {
                 // Qdrant arama endpoint'i
-                string url = $"http://localhost:6333/collections/{collectionName}/points/search";
+                string url = $"{_baseUrl}/collections/{collectionName}/points/search";
 
                 var requestBody = new
                 {
@@ -154,7 +161,7 @@ namespace MiniLms.Services
             {
                 if (pointIds == null || pointIds.Count == 0) return true;
 
-                string url = $"{QdrantBaseUrl}/collections/{collectionName}/points/delete";
+                string url = $"{_baseUrl}/collections/{collectionName}/points/delete";
                 var payload = new { points = pointIds };
 
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");

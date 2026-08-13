@@ -91,7 +91,7 @@
                     </div>
                     <div>
                         <span class="text-muted small d-block">Eksik Bulunan Ders Sayısı</span>
-                        <strong class="fs-4 text-dark">@courseGroups.Count Ders</strong>
+                        <strong class="fs-4 text-dark"><span id="totalCourseCount">@courseGroups.Count</span> Ders</strong>
                     </div>
                 </div>
             </div>
@@ -102,7 +102,7 @@
                     </div>
                     <div>
                         <span class="text-muted small d-block">Toplam Hatalı Cevap Kaydı</span>
-                        <strong class="fs-4 text-danger">@Model.Count() Soru Kaydı</strong>
+                        <strong class="fs-4 text-danger"><span id="totalErrorNum">@Model.Count()</span> Soru Kaydı</strong>
                     </div>
                 </div>
             </div>
@@ -142,7 +142,7 @@
                                         <i class="bi bi-layers-fill me-1"></i> @topicGroups.Count Semantik Konu Grubu
                                     </span>
                                     <span class="badge bg-danger-subtle text-danger border border-danger-subtle fw-bold px-3 py-2 rounded-pill">
-                                        <i class="bi bi-exclamation-circle me-1"></i> @totalWrongInCourse Hata Kaydı
+                                        <i class="bi bi-exclamation-circle me-1"></i> <span id="course-error-num-@courseId">@totalWrongInCourse</span> Hata Kaydı
                                     </span>
                                     <a asp-action="Details" asp-route-id="@firstItem.CourseId" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1">
                                         <i class="bi bi-box-arrow-in-right me-1"></i> Derse Git
@@ -162,7 +162,7 @@
                                         <h6 class="fw-bold text-slate-700 mb-0">
                                             <i class="bi bi-diagram-3-fill text-primary me-1"></i> Konu Grupları:
                                         </h6>
-                                        <span class="badge bg-secondary-subtle text-secondary small">@topicGroups.Count Konu Kümesi / @group.Count() Soru</span>
+                                        <span class="badge bg-secondary-subtle text-secondary small">@topicGroups.Count Konu Kümesi / <span id="course-total-questions-num-@courseId">@group.Count()</span> Soru</span>
                                     </div>
 
                                     <!-- SCROLL EDİLEBİLİR KONU & SORU LİSTESİ -->
@@ -185,11 +185,11 @@
                                                     </div>
                                                     <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
                                                         <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 small">
-                                                            @topicGroup.Count() Soru / @wrongCountInTopic Hata
+                                                            <span id="topic-question-num-@topicCounter">@topicGroup.Count()</span> Soru / <span id="topic-error-num-@topicCounter">@wrongCountInTopic</span> Hata
                                                         </span>
                                                         <button type="button" class="btn btn-sm btn-outline-success bg-white text-success fw-bold border-success py-1 px-2.5 rounded-pill shadow-sm hover-scale"
                                                                 title="Bu konuyu öğrendim, eksiklerimden kaldır"
-                                                                onclick="confirmDeleteTopic(event, @courseId, '@topicClusterName', 'topic-card-@topicCounter')">
+                                                                onclick="confirmDeleteTopic(event, @courseId, '@topicClusterName', 'topic-card-@topicCounter', @topicCounter, @topicGroup.Count())">
                                                             <i class="bi bi-check-circle-fill me-1"></i> Öğrendim (Konuyu Sil)
                                                         </button>
                                                         <i class="bi bi-chevron-down text-primary small ms-1" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#topic-collapse-@topicCounter"></i>
@@ -219,7 +219,7 @@
                                                                         <span class="badge bg-danger-subtle text-danger fw-bold rounded-pill px-2 py-1 small" style="font-size: 0.73rem;">
                                                                             <i class="bi bi-arrow-repeat me-1"></i> @gap.WrongCount Hata
                                                                         </span>
-                                                                        <button type="button" class="btn btn-sm btn-outline-danger border-0 py-0 px-2 rounded-circle" title="Bu soruyu sil" onclick="deleteQuestionItem(@gap.Id, 'question-card-@gap.Id')">
+                                                                        <button type="button" class="btn btn-sm btn-outline-danger border-0 py-0 px-2 rounded-circle" title="Bu soruyu sil" onclick="deleteQuestionItem(@gap.Id, 'question-card-@gap.Id', @courseId, @topicCounter)">
                                                                             <i class="bi bi-trash-fill"></i>
                                                                         </button>
                                                                         <i class="bi bi-chevron-down text-secondary small ms-1" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#question-collapse-@gap.Id"></i>
@@ -336,13 +336,28 @@
         let currentCourseId = 0;
         let currentTopicName = '';
         let currentElementId = '';
+        let currentTopicCounter = 0;
+        let currentTopicQuestionCount = 0;
 
-        function confirmDeleteTopic(event, courseId, topicName, elementId) {
+        function decrementNum(id, amount = 1) {
+            let el = document.getElementById(id);
+            if (el) {
+                let val = parseInt(el.innerText) || 0;
+                let newVal = Math.max(0, val - amount);
+                el.innerText = newVal;
+                return newVal;
+            }
+            return 0;
+        }
+
+        function confirmDeleteTopic(event, courseId, topicName, elementId, topicCounter, questionCount) {
             if (event) event.stopPropagation();
             
             currentCourseId = courseId;
             currentTopicName = topicName;
             currentElementId = elementId;
+            currentTopicCounter = topicCounter;
+            currentTopicQuestionCount = questionCount;
 
             document.getElementById('targetTopicName').innerText = `"${topicName}"`;
             
@@ -365,6 +380,13 @@
 
                 let result = await response.json();
                 if (result.success) {
+                    let deletedAmount = result.deletedCount || currentTopicQuestionCount || 1;
+
+                    // Dinamik Sayı Güncellemeleri (Anında Düşüş)
+                    decrementNum('totalErrorNum', deletedAmount);
+                    decrementNum(`course-error-num-${currentCourseId}`, deletedAmount);
+                    decrementNum(`course-total-questions-num-${currentCourseId}`, deletedAmount);
+
                     let cardEl = document.getElementById(currentElementId);
                     if (cardEl) {
                         cardEl.style.transition = 'all 0.3s ease';
@@ -381,7 +403,7 @@
             }
         });
 
-        async function deleteQuestionItem(questionId, elementId) {
+        async function deleteQuestionItem(questionId, elementId, courseId, topicCounter) {
             if (!confirm('Bu soru kaydını eksiklerinizden silmek istediğinize emin misiniz?')) return;
 
             try {
@@ -393,6 +415,13 @@
 
                 let result = await response.json();
                 if (result.success) {
+                    // Dinamik Sayı Güncellemeleri (Sayfa Yenilemeden Anında 1 Düşer)
+                    decrementNum('totalErrorNum', 1);
+                    decrementNum(`course-error-num-${courseId}`, 1);
+                    decrementNum(`course-total-questions-num-${courseId}`, 1);
+                    decrementNum(`topic-question-num-${topicCounter}`, 1);
+                    decrementNum(`topic-error-num-${topicCounter}`, 1);
+
                     let itemEl = document.getElementById(elementId);
                     if (itemEl) {
                         itemEl.style.transition = 'all 0.3s ease';
