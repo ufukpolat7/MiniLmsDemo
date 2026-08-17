@@ -178,6 +178,17 @@ namespace MiniLms.Controllers
             var currentUserId = _userManager.GetUserId(User);
             var isTeacher = User.IsInRole("Teacher");
 
+            // 🎓 EĞİTMEN ONAYLI YAYINLANMIŞ DERS ÖZETLERİ (Hem öğrenci hem öğretmen tarafı için)
+            var teacherPublishedSummaries = await _dbContext.DocumentSummaries
+                .Include(s => s.CourseDocument)
+                .Include(s => s.PublishedByTeacher)
+                .Include(s => s.User)
+                .Where(s => s.CourseId == id && s.IsTeacherPublished)
+                .OrderByDescending(s => s.PublishedAt ?? s.CreatedAt)
+                .ToListAsync();
+
+            ViewBag.TeacherPublishedSummaries = teacherPublishedSummaries;
+
             if (isTeacher)
             {
                 // 🎯 ÖĞRETMEN TARAFINDA: Derse kayıtlı öğrencileri ve her öğrencinin bu derse ait özetlerini getir
