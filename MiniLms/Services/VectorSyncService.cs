@@ -72,8 +72,8 @@ namespace MiniLms.Services
                                 }
                             }
 
-                            // Google Gemini API Rate Limit (429) engeline takılmamak için her istek arası 1.5 sn bekle
-                            await Task.Delay(1500, stoppingToken);
+                            // Google Gemini API Rate Limit (429) engeline takılmamak için her istek arası 4 sn bekle (Free tier 15 RPM sınırı)
+                            await Task.Delay(4000, stoppingToken);
                         }
                     }
                 }
