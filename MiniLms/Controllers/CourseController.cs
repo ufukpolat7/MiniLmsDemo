@@ -760,11 +760,12 @@ DERS ÖZET METNİ:
             var isTeacher = User.IsInRole("Teacher");
 
             List<DocumentSummary> teacherPublishedSummaries;
+            List<int> teacherCourseIds = new List<int>();
 
             if (isTeacher)
             {
                 // 🎓 Öğretmen İse: Kendisinin yayınladığı veya kendi derslerine ait onaylı özetleri getir
-                var teacherCourseIds = await _dbContext.Courses
+                teacherCourseIds = await _dbContext.Courses
                     .Where(c => c.TeacherId == userId)
                     .Select(c => c.Id)
                     .ToListAsync();
@@ -803,11 +804,37 @@ DERS ÖZET METNİ:
             var savedQuizzes = await _dbContext.SavedQuizzes
                 .Include(q => q.Course)
                 .Include(q => q.CourseDocument)
-                .Where(q => q.UserId == userId)
+                .Where(q => q.UserId == userId && !q.IsTeacherPublished)
                 .OrderByDescending(q => q.CreatedAt)
                 .ToListAsync();
 
+            // 🎓 Öğretmenlerin Yayınladığı Onaylı Ders Quizleri
+            List<SavedQuiz> teacherPublishedQuizzes;
+            if (isTeacher)
+            {
+                teacherPublishedQuizzes = await _dbContext.SavedQuizzes
+                    .Include(q => q.Course)
+                    .Include(q => q.CourseDocument)
+                    .Include(q => q.PublishedByTeacher)
+                    .Include(q => q.User)
+                    .Where(q => q.IsTeacherPublished && (q.PublishedByTeacherId == userId || teacherCourseIds.Contains(q.CourseId)))
+                    .OrderByDescending(q => q.PublishedAt ?? q.CreatedAt)
+                    .ToListAsync();
+            }
+            else
+            {
+                teacherPublishedQuizzes = await _dbContext.SavedQuizzes
+                    .Include(q => q.Course)
+                    .Include(q => q.CourseDocument)
+                    .Include(q => q.PublishedByTeacher)
+                    .Include(q => q.User)
+                    .Where(q => q.IsTeacherPublished)
+                    .OrderByDescending(q => q.PublishedAt ?? q.CreatedAt)
+                    .ToListAsync();
+            }
+
             ViewBag.TeacherPublishedSummaries = teacherPublishedSummaries;
+            ViewBag.TeacherPublishedQuizzes = teacherPublishedQuizzes;
             ViewBag.SavedQuizzes = savedQuizzes;
             ViewBag.IsTeacher = isTeacher;
 
@@ -1052,15 +1079,22 @@ DERS ÖZET METNİ:
             }
         }
 
-        // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama ve Yeniden Üretme Destekli)
+        // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama, Konu Odağı ve Öğretmen Yayınlama Destekli)
         [HttpGet]
-        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = true, int? quizId = null)
+        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = true, int? quizId = null, string? topicFocus = null, bool publishToStudents = false)
         {
             try
             {
                 var userId = _userManager.GetUserId(User) ?? string.Empty;
+                var isTeacher = User.IsInRole("Teacher");
 
-                // 🎯 1. Eğer "Özel Özetlerim/Quizlerim" sayfasından belirli bir Quiz ID ile çağrıldıysa veritabanındaki o quizi getir!
+                var course = await _dbContext.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
+                if (course != null && course.TeacherId == userId)
+                {
+                    isTeacher = true;
+                }
+
+                // 🎯 1. Eğer belirli bir Quiz ID ile çağrıldıysa veritabanındaki o quizi getir!
                 if (quizId.HasValue && quizId.Value > 0)
                 {
                     var savedQuiz = await _dbContext.SavedQuizzes
@@ -1077,6 +1111,8 @@ DERS ÖZET METNİ:
                             title = $"{savedQuiz.SourceFileName} Quiz (ID: #{savedQuiz.Id})",
                             sourceFileName = savedQuiz.SourceFileName,
                             isCached = true,
+                            isTeacherPublished = savedQuiz.IsTeacherPublished,
+                            topicFocus = savedQuiz.TopicFocus,
                             questions = quizQuestions
                         });
                     }
@@ -1091,12 +1127,13 @@ DERS ÖZET METNİ:
                 questionCount = Math.Clamp(questionCount, 3, 10);
                 difficulty = NormalizeDifficulty(difficulty);
 
-                // 🎯 2. Ders detayından "Quiz Oluştur" dendiğinde varsayılan olarak HER SEFERİNDE YENİ QUİZ üretilir! (forceRefresh = true)
+                // 🎯 2. Eğer forceRefresh = false ise önbellekten getir
                 if (!forceRefresh)
                 {
                     var existingQuiz = await _dbContext.SavedQuizzes
-                        .Where(q => q.CourseDocumentId == documentId && q.UserId == userId)
-                        .OrderByDescending(q => q.CreatedAt)
+                        .Where(q => q.CourseDocumentId == documentId && (q.UserId == userId || q.IsTeacherPublished))
+                        .OrderByDescending(q => q.IsTeacherPublished)
+                        .ThenByDescending(q => q.CreatedAt)
                         .FirstOrDefaultAsync();
 
                     if (existingQuiz != null && !string.IsNullOrWhiteSpace(existingQuiz.QuestionsJson))
@@ -1111,6 +1148,7 @@ DERS ÖZET METNİ:
                                 title = $"{existingQuiz.SourceFileName} Quiz (ID: #{existingQuiz.Id})",
                                 sourceFileName = existingQuiz.SourceFileName,
                                 isCached = true,
+                                isTeacherPublished = existingQuiz.IsTeacherPublished,
                                 questions = cachedQuestions
                             });
                         }
@@ -1124,7 +1162,7 @@ DERS ÖZET METNİ:
                     return Json(new { success = false, response = "Bu dokümandan quiz üretilecek metin çıkarılamadı." });
                 }
 
-                var questions = await BuildInteractiveDocumentQuizAsync(document.FileName, documentTexts, questionCount, difficulty);
+                var questions = await BuildInteractiveDocumentQuizAsync(document.FileName, documentTexts, questionCount, difficulty, topicFocus);
                 if (questions.Count == 0)
                 {
                     return Json(new
@@ -1142,12 +1180,20 @@ DERS ÖZET METNİ:
                     CourseDocumentId = documentId,
                     UserId = userId,
                     SourceFileName = document.FileName,
-                    Title = $"{document.FileName} Quiz",
+                    Title = !string.IsNullOrWhiteSpace(topicFocus) ? $"{document.FileName} - [{topicFocus}] Quiz" : $"{document.FileName} Quiz",
                     Difficulty = difficulty,
                     QuestionCount = questions.Count,
                     QuestionsJson = jsonQuestions,
+                    TopicFocus = topicFocus,
                     CreatedAt = DateTime.Now
                 };
+
+                if (isTeacher && publishToStudents)
+                {
+                    newQuiz.IsTeacherPublished = true;
+                    newQuiz.PublishedByTeacherId = userId;
+                    newQuiz.PublishedAt = DateTime.Now;
+                }
 
                 _dbContext.SavedQuizzes.Add(newQuiz);
                 await _dbContext.SaveChangesAsync();
@@ -1155,13 +1201,82 @@ DERS ÖZET METNİ:
                 return Json(new
                 {
                     success = true,
-                    title = $"{document.FileName} Quiz",
+                    quizId = newQuiz.Id,
+                    title = newQuiz.Title,
+                    isTeacherPublished = newQuiz.IsTeacherPublished,
                     questions
                 });
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, response = $"Quiz hazırlanırken teknik bir hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 Öğretmenin Hazırladığı Quizi Derse Kayıtlı Tüm Öğrencilere Göndermesi / Yayınlaması
+        [HttpPost]
+        public async Task<IActionResult> PublishTeacherQuiz(int quizId)
+        {
+            try
+            {
+                var quiz = await _dbContext.SavedQuizzes.FindAsync(quizId);
+                if (quiz == null)
+                {
+                    return Json(new { success = false, message = "Yayınlanacak quiz bulunamadı." });
+                }
+
+                var currentUserId = _userManager.GetUserId(User);
+                var isTeacher = User.IsInRole("Teacher");
+                var course = await _dbContext.Courses.FirstOrDefaultAsync(c => c.Id == quiz.CourseId);
+                if (course != null && course.TeacherId == currentUserId)
+                {
+                    isTeacher = true;
+                }
+
+                if (!isTeacher)
+                {
+                    return Json(new { success = false, message = "Yalnızca ders öğretmenleri öğrencilere quiz yayınlayabilir." });
+                }
+
+                quiz.IsTeacherPublished = true;
+                quiz.PublishedByTeacherId = currentUserId;
+                quiz.PublishedAt = DateTime.Now;
+
+                _dbContext.SavedQuizzes.Update(quiz);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, quizId = quiz.Id, message = "Quiz onaylandı ve bu derse kayıtlı öğrencilere başarıyla gönderildi!" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Quiz yayınlanırken hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 Öğretmenin Yayınlanmış Quizi Yayından Kaldırması (Taslağa Çekmesi)
+        [HttpPost]
+        public async Task<IActionResult> UnpublishTeacherQuiz(int quizId)
+        {
+            try
+            {
+                var quiz = await _dbContext.SavedQuizzes.FindAsync(quizId);
+                if (quiz == null)
+                {
+                    return Json(new { success = false, message = "Quiz bulunamadı." });
+                }
+
+                quiz.IsTeacherPublished = false;
+                quiz.PublishedByTeacherId = null;
+                quiz.PublishedAt = null;
+
+                _dbContext.SavedQuizzes.Update(quiz);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, quizId = quiz.Id, message = "Quiz yayından kaldırıldı ve kişisel taslaklarınıza çekildi!" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Quiz yayından kaldırılırken hata oluştu: {ex.Message}" });
             }
         }
 
@@ -1279,9 +1394,13 @@ Ders kaynaklarından bulunan içerik:
             return System.IO.Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ').Replace('-', ' ');
         }
 
-        private async Task<List<QuizQuestionDto>> BuildInteractiveDocumentQuizAsync(string fileName, List<string> documentTexts, int questionCount, string difficulty)
+        private async Task<List<QuizQuestionDto>> BuildInteractiveDocumentQuizAsync(string fileName, List<string> documentTexts, int questionCount, string difficulty, string? topicFocus = null)
         {
             string sourceText = string.Join("\n\n", documentTexts);
+
+            string topicFocusInstruction = !string.IsNullOrWhiteSpace(topicFocus)
+                ? $"\n🎯 ÖZEL KONU VURGUSU / BAŞLIK ODAĞI: Lütfen soruları ÖZELLİKLE şu konu ve başlıklar etrafında yoğunlaştırarak üret: \"{topicFocus}\".\n"
+                : "";
 
             string bloomRulesInstruction = @"
 Eğitimsel Yaklaşım ve Zorluk Derecelendirme Kuralları (Bloom Taksonomisi):
@@ -1314,6 +1433,7 @@ Eğitimsel Yaklaşım ve Zorluk Derecelendirme Kuralları (Bloom Taksonomisi):
 Aşağıdaki ders dokümanına dayanarak Bloom Taksonomisi prensiplerine tam uyumlu Türkçe {questionCount} adet çoktan seçmeli quiz sorusu üret.
 
 {bloomRulesInstruction}
+{topicFocusInstruction}
 
 SEÇİLEN ZORLUK STRATEJİSİ:
 {difficultyInstruction}

@@ -175,6 +175,17 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE [DocumentSummaries] ADD [PublishedAt] datetime2 NULL;
             END;
 
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[SavedQuizzes]') AND name = 'IsTeacherPublished'
+            )
+            BEGIN
+                ALTER TABLE [SavedQuizzes] ADD [IsTeacherPublished] bit NOT NULL DEFAULT 0;
+                ALTER TABLE [SavedQuizzes] ADD [TopicFocus] nvarchar(max) NULL;
+                ALTER TABLE [SavedQuizzes] ADD [PublishedByTeacherId] nvarchar(450) NULL;
+                ALTER TABLE [SavedQuizzes] ADD [PublishedAt] datetime2 NULL;
+            END;
+
             UPDATE [LessonContents] SET [IsIndexed] = 0;
         ");
     }

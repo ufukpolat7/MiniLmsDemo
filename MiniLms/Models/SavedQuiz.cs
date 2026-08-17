@@ -23,5 +23,12 @@ namespace MiniLms.Models
         public string QuestionsJson { get; set; } = string.Empty;
 
         public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+        // Öğretmen Konu Odağı ve Yayınlama Alanları
+        public string? TopicFocus { get; set; }
+        public bool IsTeacherPublished { get; set; } = false;
+        public string? PublishedByTeacherId { get; set; }
+        public ApplicationUser? PublishedByTeacher { get; set; }
+        public DateTime? PublishedAt { get; set; }
     }
 }

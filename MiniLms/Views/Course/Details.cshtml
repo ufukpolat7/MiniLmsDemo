@@ -467,7 +467,7 @@
             </div>
             <div class="modal-body">
                 <div id="quizSetup" class="quiz-setup mb-3">
-                    <div class="row g-2 align-items-end">
+                    <div class="row g-2 align-items-end mb-2">
                         <div class="col-sm-4">
                             <label class="form-label small fw-bold text-secondary">Soru Sayısı</label>
                             <select class="form-select form-select-sm" id="quizQuestionCount">
@@ -486,7 +486,15 @@
                             </select>
                         </div>
                         <div class="col-sm-3">
-                            <button type="button" class="btn btn-primary btn-sm w-100" id="quizStartBtn">Başlat</button>
+                            <button type="button" class="btn btn-primary btn-sm w-100" id="quizStartBtn"><i class="bi bi-play-circle me-1"></i> Başlat</button>
+                        </div>
+                    </div>
+                    <div class="row g-2 align-items-center">
+                        <div class="col-12">
+                            <label class="form-label small fw-bold text-secondary mb-1">
+                                <i class="bi bi-bullseye text-danger me-1"></i> Konu / Başlık Odağı <span class="fw-normal text-muted">(Opsiyonel - örn: Flip-Floplar ve Sayıcılar)</span>
+                            </label>
+                            <input type="text" class="form-control form-control-sm" id="quizTopicFocus" placeholder="AI'nın soruları özellikle odaklamasını istediğiniz başlıkları yazabilirsiniz..." />
                         </div>
                     </div>
                 </div>
@@ -514,8 +522,14 @@
                 </div>
             </div>
             <div class="modal-footer justify-content-between">
-                <div>
+                <div class="d-flex gap-2">
                     <button type="button" class="btn btn-outline-danger btn-sm d-none" id="quizDeleteBtn" title="Kayıtlı Quizi Sil"><i class="bi bi-trash me-1"></i> Quizi Sil</button>
+                    @if (User.IsInRole("Teacher") || Model.TeacherId == User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value)
+                    {
+                        <button type="button" class="btn btn-success btn-sm fw-bold d-none" id="quizPublishTeacherBtn" title="Bu Quizi Tüm Öğrencilere Gönder & Yayınla">
+                            <i class="bi bi-send-fill me-1"></i> Öğrencilere Gönder & Yayınla
+                        </button>
+                    }
                 </div>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
@@ -1354,7 +1368,23 @@
                     if (res.success) {
                         alert("✅ " + res.message);
                         $("#quizDeleteBtn").addClass("d-none");
+                        $("#quizPublishTeacherBtn").addClass("d-none");
                         resetQuizModal();
+                    } else {
+                        alert("⚠️ " + res.message);
+                    }
+                });
+            }
+        });
+
+        $(document).on("click", "#quizPublishTeacherBtn", function () {
+            if (!quizState.currentQuizId) return;
+            if (confirm("Bu quizi onaylayıp derse kayıtlı tüm öğrencilere göndermek ve yayınlamak istediğinize emin misiniz?")) {
+                $.post('@Url.Action("PublishTeacherQuiz", "Course")', { quizId: quizState.currentQuizId }, function (res) {
+                    if (res.success) {
+                        alert("✅ " + res.message);
+                        $("#quizPublishTeacherBtn").addClass("d-none");
+                        $("#quizModalLabel").append(" <span class='badge bg-success text-white' style='font-size:0.75rem!important;'>🎓 Öğrencilere Yayınlandı</span>");
                     } else {
                         alert("⚠️ " + res.message);
                     }
@@ -1366,6 +1396,7 @@
             var courseId = '@Model.Id';
             var questionCount = $("#quizQuestionCount").val();
             var difficulty = $("#quizDifficulty").val();
+            var topicFocus = $("#quizTopicFocus").val();
 
             $("#quizSetup").addClass("d-none");
             $("#quizLoading").removeClass("d-none");
@@ -1380,25 +1411,41 @@
                     documentId: quizState.documentId, 
                     questionCount: questionCount, 
                     difficulty: difficulty, 
+                    topicFocus: topicFocus,
                     forceRefresh: forceRefresh === true,
                     quizId: quizId || null
                 },
                 success: function (data) {
                     if (data.success && data.questions && data.questions.length > 0) {
                         var cacheBadge = data.isCached ? " <span class='badge bg-info text-white fs-6' style='font-size:0.75rem!important;'>💾 Kaydedilmiş Quiz (ID: #" + data.quizId + ")</span>" : " <span class='badge bg-success text-white' style='font-size:0.75rem!important;'>✨ Yeni Üretildi (ID: #" + data.quizId + ")</span>";
+                        if (data.isTeacherPublished) {
+                            cacheBadge += " <span class='badge bg-success text-white' style='font-size:0.75rem!important;'>🎓 Öğrencilere Yayınlandı</span>";
+                        }
                         
                         $("#quizModalLabel").html(escapeHtml(data.title || "Doküman Quiz") + cacheBadge);
                         if (data.sourceFileName) {
                             $("#quizProgressText").html("<span class='text-primary fw-bold'><i class='bi bi-file-earmark-pdf-fill text-danger me-1'></i> Kaynak PDF: " + escapeHtml(data.sourceFileName) + "</span>");
                         }
                         if (data.quizId) {
+                            quizState.currentQuizId = data.quizId;
                             $("#quizDeleteBtn").removeClass("d-none");
+                            if (!data.isTeacherPublished) {
+                                $("#quizPublishTeacherBtn").removeClass("d-none");
+                            } else {
+                                $("#quizPublishTeacherBtn").addClass("d-none");
+                            }
                         }
 
                         quizState.questions = data.questions;
                         quizState.answers = new Array(data.questions.length).fill(null);
                         quizState.currentIndex = 0;
-                        renderQuizQuestion();
+
+                        var isTeacherUser = @(User.IsInRole("Teacher") || Model.TeacherId == User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ? "true" : "false");
+                        if (isTeacherUser) {
+                            renderTeacherQuizAnswerKey(data.questions);
+                        } else {
+                            renderQuizQuestion();
+                        }
                     } else {
                         showQuizError(data.response || "Quiz hazırlanamadı.");
                     }
@@ -1410,6 +1457,56 @@
                     $("#quizStartBtn").prop("disabled", false);
                 }
             });
+        }
+
+        function renderTeacherQuizAnswerKey(questions) {
+            $("#quizLoading").addClass("d-none");
+            $("#quizQuestionArea").addClass("d-none");
+            $("#quizResultArea").removeClass("d-none");
+            $("#quizProgressText").html("<span class='badge bg-success text-white px-2 py-1'><i class='bi bi-award-fill me-1'></i> Eğitmen Soru & Cevap Anahtarı Cetveli</span>");
+            $("#quizProgressBar").css("width", "100%");
+            $("#quizScoreText").html("<i class='bi bi-file-earmark-check text-success me-2'></i> Cevap Anahtarı & Soru İnceleme Cetveli");
+            $("#quizScoreDetail").text("Tüm sorular, doğru yanıtları, kaynak ipuçları ve detaylı açıklamaları ile aşağıda listelenmiştir.");
+
+            var reviewHtml = "";
+            questions.forEach(function (question, index) {
+                reviewHtml += "<div class='quiz-review-item correct position-relative shadow-sm mb-3 p-3 rounded-3 border border-success border-opacity-25 bg-white'>";
+                reviewHtml += "<div class='position-absolute top-0 end-0 m-3 d-flex align-items-center gap-1'>" + getDifficultyDotHtml(question.difficulty) + "</div>";
+                reviewHtml += "<h6 class='fw-bold mb-2 text-dark' style='font-size: 1.05rem;'>" + (index + 1) + ". " + escapeHtml(question.question) + "</h6>";
+                reviewHtml += "<div class='quiz-review-meta mb-3 d-flex flex-wrap gap-2'>" +
+                    "<span class='badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25'><i class='bi bi-bar-chart me-1'></i> " + escapeHtml(question.difficulty || "Orta") + "</span>" +
+                    "<span class='badge bg-info bg-opacity-10 text-info border border-info border-opacity-25'><i class='bi bi-mortarboard me-1'></i> " + escapeHtml(question.bloomLevel || "Anlama") + "</span>" +
+                    "<span class='badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25'><i class='bi bi-tag me-1'></i> " + escapeHtml(question.topic || "Doküman içeriği") + "</span>" +
+                    "</div>";
+
+                reviewHtml += "<div class='my-2 d-flex flex-column gap-2'>";
+                question.options.forEach(function (optText, optIdx) {
+                    var letter = String.fromCharCode(65 + optIdx);
+                    if (optIdx === question.correctIndex) {
+                        reviewHtml += "<div class='quiz-review-option correct-option p-2 rounded bg-success bg-opacity-10 border border-success text-dark d-flex justify-content-between align-items-center'>" +
+                            "<span><strong class='text-success me-2'>" + letter + ")</strong> " + escapeHtml(optText) + "</span> " +
+                            "<span class='badge bg-success text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-check-circle-fill me-1'></i> DOĞRU CEVAP</span>" +
+                            "</div>";
+                    } else {
+                        reviewHtml += "<div class='quiz-review-option neutral-option p-2 rounded bg-light border text-secondary'>" +
+                            "<span><strong class='me-2'>" + letter + ")</strong> " + escapeHtml(optText) + "</span>" +
+                            "</div>";
+                    }
+                });
+                reviewHtml += "</div>";
+
+                reviewHtml += "<div class='mt-3 p-3 rounded bg-light border border-secondary border-opacity-25'>" +
+                    "<small class='d-block text-dark fw-bold mb-1'><i class='bi bi-lightbulb-fill text-warning me-1'></i> DOĞRU CEVAP AÇIKLAMASI:</small>" +
+                    "<small class='text-secondary d-block mb-2' style='line-height:1.5;'>" + escapeHtml(question.explanation || "") + "</small>";
+
+                if (question.sourceHint) {
+                    reviewHtml += "<small class='d-block text-muted border-top pt-2 mt-2'><i class='bi bi-search text-primary me-1'></i> Kaynak İpucu: " + escapeHtml(question.sourceHint) + "</small>";
+                }
+                reviewHtml += "</div></div>";
+            });
+
+            $("#quizReview").html(reviewHtml);
+            $("#quizNextBtn").prop("disabled", true).text("Öğretmen İnceleme Modu").removeClass("btn-primary").addClass("btn-success");
         }
 
         function getDifficultyDotHtml(difficulty) {

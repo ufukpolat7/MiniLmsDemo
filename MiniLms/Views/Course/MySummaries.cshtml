@@ -5,21 +5,21 @@
     var savedQuizzes = ViewBag.SavedQuizzes as IEnumerable<MiniLms.Models.SavedQuiz>;
     var teacherSummaries = ViewBag.TeacherPublishedSummaries as IEnumerable<MiniLms.Models.DocumentSummary>;
 
-    var groupedPersonalSummaries = Model != null && Model.Any()
-        ? Model.GroupBy(s => new {
-            CourseId = s.CourseId,
-            CourseTitle = s.Course?.Title ?? "Bilinmeyen Ders",
-            CourseCode = s.Course?.CourseCode ?? "DERS"
-          }).ToList()
-        : null;
+    var teacherSummariesList = (ViewBag.TeacherPublishedSummaries as IEnumerable<MiniLms.Models.DocumentSummary>)?.ToList() ?? new List<MiniLms.Models.DocumentSummary>();
+    var teacherQuizzesList = ViewBag.TeacherPublishedQuizzes as List<MiniLms.Models.SavedQuiz> ?? new List<MiniLms.Models.SavedQuiz>();
 
-    var groupedTeacherSummaries = teacherSummaries != null && teacherSummaries.Any()
-        ? teacherSummaries.GroupBy(s => new {
-            CourseId = s.CourseId,
-            CourseTitle = s.Course?.Title ?? "Bilinmeyen Ders",
-            CourseCode = s.Course?.CourseCode ?? "DERS"
-          }).ToList()
-        : null;
+    var personalSummariesList = Model?.ToList() ?? new List<MiniLms.Models.DocumentSummary>();
+    var personalQuizzesList = (ViewBag.SavedQuizzes as IEnumerable<MiniLms.Models.SavedQuiz>)?.ToList() ?? new List<MiniLms.Models.SavedQuiz>();
+
+    var teacherCourseGroups = teacherSummariesList.Select(s => new { CourseId = s.CourseId, CourseTitle = s.Course?.Title ?? "Bilinmeyen Ders", CourseCode = s.Course?.CourseCode ?? "DERS" })
+        .Union(teacherQuizzesList.Select(q => new { CourseId = q.CourseId, CourseTitle = q.Course?.Title ?? "Bilinmeyen Ders", CourseCode = q.Course?.CourseCode ?? "DERS" }))
+        .Distinct()
+        .ToList();
+
+    var personalCourseGroups = personalSummariesList.Select(s => new { CourseId = s.CourseId, CourseTitle = s.Course?.Title ?? "Bilinmeyen Ders", CourseCode = s.Course?.CourseCode ?? "DERS" })
+        .Union(personalQuizzesList.Select(q => new { CourseId = q.CourseId, CourseTitle = q.Course?.Title ?? "Bilinmeyen Ders", CourseCode = q.Course?.CourseCode ?? "DERS" }))
+        .Distinct()
+        .ToList();
 }
 
 <div class="container mt-4 mb-5">
@@ -110,80 +110,143 @@
     </ul>
 
     <div class="tab-content" id="summaryCategoryTabContent">
-        <!-- 🎯 TAB 1: ÖĞRETMENLERİN YAYINLADIĞI ÖZETLER -->
+        <!-- 🎯 TAB 1: ÖĞRETMENLERİN YAYINLADIĞI ÖZETLER VE QUİZLER -->
         <div class="tab-pane fade show active" id="teacherSummariesPane" role="tabpanel" aria-labelledby="teacher-tab">
-            @if (groupedTeacherSummaries != null && groupedTeacherSummaries.Any())
+            @if (teacherCourseGroups.Any())
             {
                 <div class="accordion shadow-sm rounded border mb-4" id="teacherCourseAccordion">
-                    @for (int i = 0; i < groupedTeacherSummaries.Count; i++)
+                    @for (int i = 0; i < teacherCourseGroups.Count; i++)
                     {
-                        var group = groupedTeacherSummaries[i];
-                        string accordionId = $"collapse-teacher-course-{group.Key.CourseId}";
-                        string headingId = $"heading-teacher-course-{group.Key.CourseId}";
+                        var group = teacherCourseGroups[i];
+                        string accordionId = $"collapse-teacher-course-{group.CourseId}";
+                        string headingId = $"heading-teacher-course-{group.CourseId}";
                         bool isFirst = i == 0;
+
+                        var courseTeacherSummaries = teacherSummariesList.Where(s => s.CourseId == group.CourseId).ToList();
+                        var courseTeacherQuizzes = teacherQuizzesList.Where(q => q.CourseId == group.CourseId).ToList();
 
                         <div class="accordion-item border-0 mb-2 rounded shadow-xs overflow-hidden">
                             <h2 class="accordion-header" id="@headingId">
                                 <button class="accordion-button @(isFirst ? "" : "collapsed") bg-success bg-opacity-10 text-dark fw-bold py-3 px-4" type="button" data-bs-toggle="collapse" data-bs-target="#@accordionId" aria-expanded="@(isFirst ? "true" : "false")" aria-controls="@accordionId">
                                     <div class="d-flex align-items-center justify-content-between w-100 me-3">
                                         <div>
-                                            <span class="badge bg-success me-2 px-2 py-1">@group.Key.CourseCode</span>
-                                            <span class="fs-6 text-dark fw-bold">@group.Key.CourseTitle</span>
+                                            <span class="badge bg-success me-2 px-2 py-1">@group.CourseCode</span>
+                                            <span class="fs-6 text-dark fw-bold">@group.CourseTitle</span>
                                         </div>
                                         <span class="badge bg-white text-success border border-success px-3 py-1">
-                                            <i class="bi bi-patch-check-fill me-1"></i> @group.Count() Eğitmen Onaylı Özet
+                                            <i class="bi bi-patch-check-fill me-1"></i> @courseTeacherSummaries.Count Eğitmen Özeti, @courseTeacherQuizzes.Count Eğitmen Quizi
                                         </span>
                                     </div>
                                 </button>
                             </h2>
                             <div id="@accordionId" class="accordion-collapse collapse @(isFirst ? "show" : "")" aria-labelledby="@headingId" data-bs-parent="#teacherCourseAccordion">
                                 <div class="accordion-body bg-white p-3">
-                                    <div class="row row-cols-1 row-cols-md-2 g-3">
-                                        @foreach (var summary in group)
-                                        {
-                                            var teacherUser = summary.PublishedByTeacher ?? summary.User;
-                                            string teacherName = teacherUser != null ? $"{teacherUser.FirstName} {teacherUser.LastName}".Trim() : "Ders Öğretmeni";
+                                    @if (courseTeacherSummaries.Any())
+                                    {
+                                        <div class="mb-3">
+                                            <h6 class="fw-bold text-success mb-3"><i class="bi bi-file-earmark-text-fill text-success me-1"></i> 🎓 Eğitmen Onaylı Ders Özetleri</h6>
+                                            <div class="row row-cols-1 row-cols-md-2 g-3">
+                                                @foreach (var summary in courseTeacherSummaries)
+                                                {
+                                                    var teacherUser = summary.PublishedByTeacher ?? summary.User;
+                                                    string teacherName = teacherUser != null ? $"{teacherUser.FirstName} {teacherUser.LastName}".Trim() : "Ders Öğretmeni";
 
-                                            <div class="col" id="my-summary-card-@summary.Id">
-                                                <div class="card h-100 shadow-sm border border-success-subtle rounded-3" style="background-color: #f0fdf4;">
-                                                    <div class="card-header bg-white border-0 py-2 d-flex justify-content-between align-items-center">
-                                                        <div>
-                                                            <span class="badge bg-success me-1"><i class="bi bi-patch-check-fill me-1"></i> Eğitmen Onaylı</span>
-                                                            @if (!string.IsNullOrEmpty(summary.AudioFilePath))
-                                                            {
-                                                                <span class="badge bg-primary" style="font-size: 10px;"><i class="bi bi-volume-up-fill"></i> Sesli Dinlenebilir</span>
-                                                            }
+                                                    <div class="col" id="my-summary-card-@summary.Id">
+                                                        <div class="card h-100 shadow-sm border border-success-subtle rounded-3" style="background-color: #f0fdf4;">
+                                                            <div class="card-header bg-white border-0 py-2 d-flex justify-content-between align-items-center">
+                                                                <div>
+                                                                    <span class="badge bg-success me-1"><i class="bi bi-patch-check-fill me-1"></i> Eğitmen Onaylı</span>
+                                                                    @if (!string.IsNullOrEmpty(summary.AudioFilePath))
+                                                                    {
+                                                                        <span class="badge bg-primary" style="font-size: 10px;"><i class="bi bi-volume-up-fill"></i> Sesli Dinlenebilir</span>
+                                                                    }
+                                                                </div>
+                                                                <small class="text-muted" style="font-size: 11px;">⏱️ @((summary.PublishedAt ?? summary.CreatedAt).ToString("dd.MM.yyyy HH:mm"))</small>
+                                                            </div>
+                                                            <div class="card-body py-2">
+                                                                <h6 class="fw-bold text-dark mb-1 text-truncate" title="@summary.CourseDocument?.FileName">
+                                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
+                                                                </h6>
+                                                                <small class="text-success fw-semibold d-block mb-2"><i class="bi bi-person-fill me-1"></i> @teacherName tarafından yayınlandı</small>
+                                                                <div class="bg-white p-2.5 rounded border border-success-subtle text-muted small" style="max-height: 85px; overflow: hidden; font-size: 0.85rem;">
+                                                                    @(summary.SummaryText.Length > 160 ? summary.SummaryText.Substring(0, 160) + "..." : summary.SummaryText)
+                                                                </div>
+                                                            </div>
+                                                            <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex align-items-center justify-content-between gap-1">
+                                                                <button type="button" class="btn btn-xs btn-success btn-sm btn-audio-summary-card" data-courseid="@summary.CourseId" data-docid="@summary.CourseDocumentId" title="Sesli Özeti Dinle">
+                                                                    <i class="bi bi-volume-up-fill me-1"></i> Sesli Dinle
+                                                                </button>
+                                                                <div class="d-flex gap-1">
+                                                                    <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName" title="Özeti Gör">
+                                                                        <i class="bi bi-book-half me-1"></i> Eğitmen Özetini Oku
+                                                                    </button>
+                                                                    @if (isTeacherRole)
+                                                                    {
+                                                                        <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
+                                                                        <button type="button" class="btn btn-xs btn-outline-secondary btn-sm btn-unpublish-summary-card" data-id="@summary.Id" title="Yayından Kaldır / Taslağa Çek"><i class="bi bi-eye-slash"></i> Yayından Kaldır</button>
+                                                                    }
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                        <small class="text-muted" style="font-size: 11px;">⏱️ @((summary.PublishedAt ?? summary.CreatedAt).ToString("dd.MM.yyyy HH:mm"))</small>
                                                     </div>
-                                                    <div class="card-body py-2">
-                                                        <h6 class="fw-bold text-dark mb-1 text-truncate" title="@summary.CourseDocument?.FileName">
-                                                            <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
-                                                        </h6>
-                                                        <small class="text-success fw-semibold d-block mb-2"><i class="bi bi-person-fill me-1"></i> @teacherName tarafından yayınlandı</small>
-                                                        <div class="bg-white p-2.5 rounded border border-success-subtle text-muted small" style="max-height: 85px; overflow: hidden; font-size: 0.85rem;">
-                                                            @(summary.SummaryText.Length > 160 ? summary.SummaryText.Substring(0, 160) + "..." : summary.SummaryText)
-                                                        </div>
-                                                    </div>
-                                                    <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex align-items-center justify-content-between gap-1">
-                                                        <button type="button" class="btn btn-xs btn-success btn-sm btn-audio-summary-card" data-courseid="@summary.CourseId" data-docid="@summary.CourseDocumentId" title="Sesli Özeti Dinle">
-                                                            <i class="bi bi-volume-up-fill me-1"></i> Sesli Dinle
-                                                        </button>
-                                                        <div class="d-flex gap-1">
-                                                            <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName" title="Özeti Gör">
-                                                                <i class="bi bi-book-half me-1"></i> Eğitmen Özetini Oku
-                                                            </button>
-                                                            @if (isTeacherRole)
-                                                            {
-                                                                <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
-                                                                <button type="button" class="btn btn-xs btn-outline-secondary btn-sm btn-unpublish-summary-card" data-id="@summary.Id" title="Yayından Kaldır / Taslağa Çek"><i class="bi bi-eye-slash"></i> Yayından Kaldır</button>
-                                                            }
-                                                        </div>
-                                                    </div>
-                                                </div>
+                                                }
                                             </div>
-                                        }
-                                    </div>
+                                        </div>
+                                    }
+                                    
+                                    @if (courseTeacherQuizzes.Any())
+                                    {
+                                        <div class="pt-3 border-top mt-3">
+                                            <h6 class="fw-bold text-success mb-3"><i class="bi bi-puzzle-fill text-success me-1"></i> 🎓 Eğitmen Tarafından Gönderilen Onaylı Quizler</h6>
+                                            <div class="row row-cols-1 row-cols-md-2 g-3">
+                                                @foreach (var quiz in courseTeacherQuizzes)
+                                                {
+                                                    <div class="col" id="my-quiz-card-@quiz.Id">
+                                                        <div class="card h-100 shadow-sm border-success border-opacity-50 rounded-3">
+                                                            <div class="card-header bg-success bg-opacity-10 border-0 py-2 d-flex justify-content-between align-items-center">
+                                                                <div>
+                                                                    <span class="badge bg-success me-1" style="font-size: 10px;">Eğitmen Quizi #@quiz.Id</span>
+                                                                    <span class="badge bg-dark text-white fw-bold" style="font-size: 10px;">@quiz.Difficulty.ToUpper()</span>
+                                                                </div>
+                                                                <small class="text-muted" style="font-size: 11px;">⏱️ @(quiz.PublishedAt?.ToString("dd.MM.yyyy HH:mm") ?? quiz.CreatedAt.ToString("dd.MM.yyyy HH:mm"))</small>
+                                                            </div>
+                                                            <div class="card-body py-2">
+                                                                <h6 class="fw-bold text-dark mb-1 text-truncate" title="@quiz.Title">
+                                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @quiz.Title
+                                                                </h6>
+                                                                @if (!string.IsNullOrWhiteSpace(quiz.TopicFocus))
+                                                                {
+                                                                    <div class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 small mb-2 text-wrap text-start">
+                                                                        🎯 Konu Odağı: @quiz.TopicFocus
+                                                                    </div>
+                                                                }
+                                                                <small class="text-muted d-block"><i class="bi bi-question-circle me-1"></i> Toplam @quiz.QuestionCount Soru Hazır</small>
+                                                            </div>
+                                                            <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
+                                                                <div class="d-flex gap-1">
+                                                                    <button type="button" class="btn btn-xs btn-success btn-sm btn-solve-quiz" data-quizid="@quiz.Id" data-courseid="@quiz.CourseId" data-docid="@quiz.CourseDocumentId">
+                                                                        <i class="bi bi-eye-fill me-1"></i> @(isTeacherRole ? "Quizi İncele & Cevaplar" : $"Quizi Çöz (#Quiz-{quiz.Id})")
+                                                                    </button>
+                                                                    @if (isTeacherRole)
+                                                                    {
+                                                                        <button type="button" class="btn btn-xs btn-outline-secondary btn-sm btn-unpublish-quiz-card" data-quizid="@quiz.Id" title="Yayından Kaldır / Taslağa Çek">
+                                                                            <i class="bi bi-eye-slash me-1"></i> Yayından Kaldır
+                                                                        </button>
+                                                                    }
+                                                                </div>
+                                                                @if (isTeacherRole)
+                                                                {
+                                                                    <button type="button" class="btn btn-xs btn-outline-danger btn-sm btn-delete-quiz" data-quizid="@quiz.Id" title="Quizi Sil">
+                                                                        <i class="bi bi-trash"></i> Sil
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
                                 </div>
                             </div>
                         </div>
@@ -202,38 +265,37 @@
             }
         </div>
 
-        <!-- 🎯 TAB 2: BENİM ÇIKARDIĞIM KİŞİSEL ÖZETLER -->
+        <!-- 🎯 TAB 2: BENİM ÇIKARDIĞIM KİŞİSEL ÖZETLER VE QUİZLER -->
         <div class="tab-pane fade" id="personalSummariesPane" role="tabpanel" aria-labelledby="personal-tab">
-            @if (groupedPersonalSummaries != null && groupedPersonalSummaries.Any())
+            @if (personalCourseGroups.Any())
             {
                 <div class="accordion shadow-sm rounded border mb-4" id="personalCourseAccordion">
-                    @for (int i = 0; i < groupedPersonalSummaries.Count; i++)
+                    @for (int i = 0; i < personalCourseGroups.Count; i++)
                     {
-                        var group = groupedPersonalSummaries[i];
-                        string accordionId = $"collapse-personal-course-{group.Key.CourseId}";
-                        string headingId = $"heading-personal-course-{group.Key.CourseId}";
+                        var group = personalCourseGroups[i];
+                        string accordionId = $"collapse-personal-course-{group.CourseId}";
+                        string headingId = $"heading-personal-course-{group.CourseId}";
                         bool isFirst = i == 0;
 
-                        var courseQuizzes = savedQuizzes != null 
-                            ? savedQuizzes.Where(q => q.CourseId == group.Key.CourseId).ToList() 
-                            : new List<MiniLms.Models.SavedQuiz>();
+                        var coursePersonalSummaries = personalSummariesList.Where(s => s.CourseId == group.CourseId).ToList();
+                        var coursePersonalQuizzes = personalQuizzesList.Where(q => q.CourseId == group.CourseId).ToList();
 
                         <div class="accordion-item border-0 mb-2 rounded shadow-xs overflow-hidden">
                             <h2 class="accordion-header" id="@headingId">
                                 <button class="accordion-button @(isFirst ? "" : "collapsed") bg-light text-dark fw-bold py-3 px-4" type="button" data-bs-toggle="collapse" data-bs-target="#@accordionId" aria-expanded="@(isFirst ? "true" : "false")" aria-controls="@accordionId">
                                     <div class="d-flex align-items-center justify-content-between w-100 me-3">
                                         <div>
-                                            <span class="badge bg-primary me-2 px-2 py-1">@group.Key.CourseCode</span>
-                                            <span class="fs-6 text-dark fw-bold">@group.Key.CourseTitle</span>
+                                            <span class="badge bg-primary me-2 px-2 py-1">@group.CourseCode</span>
+                                            <span class="fs-6 text-dark fw-bold">@group.CourseTitle</span>
                                         </div>
                                         <div class="d-flex gap-2">
                                             <span class="badge bg-white text-primary border border-primary px-3 py-1">
-                                                <i class="bi bi-file-earmark-pdf me-1"></i> @group.Count() Kişisel Özet
+                                                <i class="bi bi-file-earmark-pdf me-1"></i> @coursePersonalSummaries.Count Kişisel Özet
                                             </span>
-                                            @if (courseQuizzes.Any())
+                                            @if (coursePersonalQuizzes.Any())
                                             {
                                                 <span class="badge bg-warning text-dark border border-warning px-3 py-1">
-                                                    <i class="bi bi-puzzle-fill me-1"></i> @courseQuizzes.Count Quiz Kayıtlı
+                                                    <i class="bi bi-puzzle-fill me-1"></i> @coursePersonalQuizzes.Count Quiz Kayıtlı
                                                 </span>
                                             }
                                         </div>
@@ -242,61 +304,56 @@
                             </h2>
                             <div id="@accordionId" class="accordion-collapse collapse @(isFirst ? "show" : "")" aria-labelledby="@headingId" data-bs-parent="#personalCourseAccordion">
                                 <div class="accordion-body bg-white p-3">
-                                    <!-- 1. DERS ÖZETLERİ -->
-                                    <h6 class="fw-bold text-primary mb-3"><i class="bi bi-journal-bookmark-fill me-1"></i> Çıkardığım Kişisel Özetler</h6>
-                                    <div class="row row-cols-1 row-cols-md-2 g-3 mb-4">
-                                        @foreach (var summary in group)
-                                        {
-                                            <div class="col" id="my-summary-card-@summary.Id">
-                                                <div class="card h-100 shadow-sm border border-light rounded-3">
-                                                    <div class="card-header bg-white border-0 py-2 d-flex justify-content-between align-items-center">
-                                                        <div>
-                                                            <span class="badge bg-secondary me-1" style="font-size: 10px;">ID: #@summary.Id</span>
-                                                            @if (!string.IsNullOrEmpty(summary.AudioFilePath))
-                                                            {
-                                                                <span class="badge bg-success" style="font-size: 10px;"><i class="bi bi-volume-up-fill"></i> Sesli Dinlenebilir</span>
-                                                            }
-                                                        </div>
-                                                        <small class="text-muted" style="font-size: 11px;">⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
-                                                    </div>
-                                                    <div class="card-body py-2">
-                                                        <h6 class="fw-bold text-dark mb-2 text-truncate" title="@summary.CourseDocument?.FileName">
-                                                            <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
-                                                        </h6>
-                                                        <div class="bg-light p-2 rounded border text-muted small" style="max-height: 80px; overflow: hidden; font-size: 0.85rem;">
-                                                            @(summary.SummaryText.Length > 160 ? summary.SummaryText.Substring(0, 160) + "..." : summary.SummaryText)
-                                                        </div>
-                                                    </div>
-                                                    <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex flex-wrap align-items-center justify-content-between gap-1">
-                                                        <div>
-                                                            <button type="button" class="btn btn-xs btn-success btn-sm btn-audio-summary-card" data-courseid="@summary.CourseId" data-docid="@summary.CourseDocumentId" title="Sesli Özeti Dinle">
-                                                                <i class="bi bi-volume-up-fill me-1"></i> Sesli Dinle
-                                                            </button>
-                                                        </div>
-                                                        <div class="d-flex gap-1">
-                                                            @if (isTeacherRole)
-                                                            {
-                                                                <button type="button" class="btn btn-xs btn-success btn-sm btn-publish-summary-card" data-id="@summary.Id" title="Bu Özeti Onaylayıp Öğrencilere Yayınla">
-                                                                    <i class="bi bi-send-fill me-1"></i> Yayınla
-                                                                </button>
-                                                            }
-                                                            <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName" title="Özeti Gör"><i class="bi bi-eye"></i> Oku</button>
-                                                            <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
-                                                            <button type="button" class="btn btn-xs btn-danger btn-sm btn-delete-card" data-id="@summary.Id" title="Özeti Sil"><i class="bi bi-trash"></i></button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        }
-                                    </div>
-
-                                    <!-- 2. DERS QUIZLERI -->
-                                    @if (courseQuizzes.Any())
+                                    @if (coursePersonalSummaries.Any())
                                     {
-                                        <div class="pt-3 border-top">
-                                            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-puzzle-fill text-warning me-1"></i> Kaydedilmiş Ders Quizleri (#Quiz ID)</h6>
+                                        <div class="mb-3">
+                                            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-file-earmark-text text-primary me-1"></i> Çıkarılan Kişisel Ders Özetleri</h6>
                                             <div class="row row-cols-1 row-cols-md-2 g-3">
-                                                @foreach (var quiz in courseQuizzes)
+                                                @foreach (var summary in coursePersonalSummaries)
+                                                {
+                                                    <div class="col" id="my-summary-card-@summary.Id">
+                                                        <div class="card h-100 shadow-sm border-0 rounded-3">
+                                                            <div class="card-header bg-white border-0 py-2 d-flex justify-content-between align-items-center">
+                                                                <span class="badge bg-secondary text-white" style="font-size: 10px;">ID: #@summary.Id</span>
+                                                                <small class="text-muted" style="font-size: 11px;">⏱️ @summary.CreatedAt.ToString("dd.MM.yyyy HH:mm")</small>
+                                                            </div>
+                                                            <div class="card-body py-2">
+                                                                <h6 class="fw-bold text-dark mb-1 text-truncate" title="@summary.CourseDocument?.FileName">
+                                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(summary.CourseDocument?.FileName ?? "Ders Dokümanı")
+                                                                </h6>
+                                                                <div class="text-muted small text-truncate-2 mb-2" style="max-height: 42px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+                                                                    @(summary.SummaryText.Length > 160 ? summary.SummaryText.Substring(0, 160) + "..." : summary.SummaryText)
+                                                                </div>
+                                                            </div>
+                                                            <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex align-items-center justify-content-between gap-1">
+                                                                <button type="button" class="btn btn-xs btn-success btn-sm btn-audio-summary-card" data-courseid="@summary.CourseId" data-docid="@summary.CourseDocumentId" title="Sesli Özeti Dinle">
+                                                                    <i class="bi bi-volume-up-fill me-1"></i> Sesli Dinle
+                                                                </button>
+                                                                <div class="d-flex gap-1">
+                                                                    @if (isTeacherRole)
+                                                                    {
+                                                                        <button type="button" class="btn btn-xs btn-success btn-sm btn-publish-summary-card" data-id="@summary.Id" title="Bu Özeti Onaylayıp Öğrencilere Yayınla">
+                                                                            <i class="bi bi-send-fill me-1"></i> Yayınla
+                                                                        </button>
+                                                                    }
+                                                                    <button type="button" class="btn btn-xs btn-primary btn-sm btn-view-modal" data-id="@summary.Id" data-title="@summary.CourseDocument?.FileName" title="Özeti Gör"><i class="bi bi-eye"></i> Oku</button>
+                                                                    <button type="button" class="btn btn-xs btn-warning btn-sm text-white btn-edit-modal" data-id="@summary.Id" title="Özeti Düzenle"><i class="bi bi-pencil-square"></i></button>
+                                                                    <button type="button" class="btn btn-xs btn-danger btn-sm btn-delete-card" data-id="@summary.Id" title="Özeti Sil"><i class="bi bi-trash"></i></button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @if (coursePersonalQuizzes.Any())
+                                    {
+                                        <div class="pt-3 border-top mt-3">
+                                            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-puzzle-fill text-warning me-1"></i> Kaydedilmiş Kişisel / Taslak Quizler (#Quiz ID)</h6>
+                                            <div class="row row-cols-1 row-cols-md-2 g-3">
+                                                @foreach (var quiz in coursePersonalQuizzes)
                                                 {
                                                     <div class="col" id="my-quiz-card-@quiz.Id">
                                                         <div class="card h-100 shadow-sm border-warning border-opacity-50 rounded-3">
@@ -309,14 +366,34 @@
                                                             </div>
                                                             <div class="card-body py-2">
                                                                 <h6 class="fw-bold text-dark mb-1 text-truncate" title="@quiz.SourceFileName">
-                                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> Kaynak PDF: @(quiz.SourceFileName)
+                                                                    <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> @(quiz.SourceFileName)
                                                                 </h6>
+                                                                @if (!string.IsNullOrWhiteSpace(quiz.TopicFocus))
+                                                                {
+                                                                    <div class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 small mb-2 text-wrap text-start">
+                                                                        🎯 Konu Odağı: @quiz.TopicFocus
+                                                                    </div>
+                                                                }
                                                                 <small class="text-muted d-block mb-2"><i class="bi bi-question-circle me-1"></i> Toplam @quiz.QuestionCount Soru Hazır</small>
                                                             </div>
                                                             <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
-                                                                <button type="button" class="btn btn-xs btn-primary btn-sm btn-solve-quiz" data-quizid="@quiz.Id" data-courseid="@quiz.CourseId" data-docid="@quiz.CourseDocumentId">
-                                                                    <i class="bi bi-puzzle-fill me-1"></i> Quizi Çöz (#Quiz-@quiz.Id)
-                                                                </button>
+                                                                <div class="d-flex gap-1">
+                                                                    @if (isTeacherRole)
+                                                                    {
+                                                                        <button type="button" class="btn btn-xs btn-success btn-sm btn-publish-quiz-card" data-quizid="@quiz.Id" title="Bu Quizi Onaylayıp Derse Kayıtlı Tüm Öğrencilere Gönder">
+                                                                            <i class="bi bi-send-fill me-1"></i> Öğrencilere Gönder
+                                                                        </button>
+                                                                        <button type="button" class="btn btn-xs btn-primary btn-sm btn-solve-quiz" data-quizid="@quiz.Id" data-courseid="@quiz.CourseId" data-docid="@quiz.CourseDocumentId">
+                                                                            <i class="bi bi-eye-fill me-1"></i> Quizi İncele & Cevaplar
+                                                                        </button>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <button type="button" class="btn btn-xs btn-primary btn-sm btn-solve-quiz" data-quizid="@quiz.Id" data-courseid="@quiz.CourseId" data-docid="@quiz.CourseDocumentId">
+                                                                            <i class="bi bi-puzzle-fill me-1"></i> Quizi Çöz (#Quiz-@quiz.Id)
+                                                                        </button>
+                                                                    }
+                                                                </div>
                                                                 <button type="button" class="btn btn-xs btn-outline-danger btn-sm btn-delete-quiz" data-quizid="@quiz.Id" title="Quizi Sil">
                                                                     <i class="bi bi-trash"></i> Sil
                                                                 </button>
@@ -745,11 +822,62 @@
                 $("#quizNextBtn").prop("disabled", true);
             }
 
-            // 🎯 KAYDEDİLMİŞ QUIZI ÇÖZ
+            function renderTeacherQuizAnswerKey(questions) {
+                $("#quizLoading").addClass("d-none");
+                $("#quizQuestionArea").addClass("d-none");
+                $("#quizResultArea").removeClass("d-none");
+                $("#quizProgressText").html("<span class='badge bg-success text-white px-2 py-1'><i class='bi bi-award-fill me-1'></i> Eğitmen Soru & Cevap Anahtarı Cetveli</span>");
+                $("#quizProgressBar").css("width", "100%");
+                $("#quizScoreText").html("<i class='bi bi-file-earmark-check text-success me-2'></i> Cevap Anahtarı & Soru İnceleme Cetveli");
+                $("#quizScoreDetail").text("Tüm sorular, doğru yanıtları, kaynak ipuçları ve detaylı açıklamaları ile aşağıda listelenmiştir.");
+
+                var reviewHtml = "";
+                questions.forEach(function (question, index) {
+                    reviewHtml += "<div class='quiz-review-item correct position-relative shadow-sm mb-3 p-3 rounded-3 border border-success border-opacity-25 bg-white'>";
+                    reviewHtml += "<div class='position-absolute top-0 end-0 m-3 d-flex align-items-center gap-1'>" + getDifficultyDotHtml(question.difficulty) + "</div>";
+                    reviewHtml += "<h6 class='fw-bold mb-2 text-dark' style='font-size: 1.05rem;'>" + (index + 1) + ". " + escapeHtml(question.question) + "</h6>";
+                    reviewHtml += "<div class='quiz-review-meta mb-3 d-flex flex-wrap gap-2'>" +
+                        "<span class='badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25'><i class='bi bi-bar-chart me-1'></i> " + escapeHtml(question.difficulty || "Orta") + "</span>" +
+                        "<span class='badge bg-info bg-opacity-10 text-info border border-info border-opacity-25'><i class='bi bi-mortarboard me-1'></i> " + escapeHtml(question.bloomLevel || "Anlama") + "</span>" +
+                        "<span class='badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25'><i class='bi bi-tag me-1'></i> " + escapeHtml(question.topic || "Doküman içeriği") + "</span>" +
+                        "</div>";
+
+                    reviewHtml += "<div class='my-2 d-flex flex-column gap-2'>";
+                    question.options.forEach(function (optText, optIdx) {
+                        var letter = String.fromCharCode(65 + optIdx);
+                        if (optIdx === question.correctIndex) {
+                            reviewHtml += "<div class='quiz-review-option correct-option p-2 rounded bg-success bg-opacity-10 border border-success text-dark d-flex justify-content-between align-items-center'>" +
+                                "<span><strong class='text-success me-2'>" + letter + ")</strong> " + escapeHtml(optText) + "</span> " +
+                                "<span class='badge bg-success text-white px-2 py-1' style='font-size: 0.75rem;'><i class='bi bi-check-circle-fill me-1'></i> DOĞRU CEVAP</span>" +
+                                "</div>";
+                        } else {
+                            reviewHtml += "<div class='quiz-review-option neutral-option p-2 rounded bg-light border text-secondary'>" +
+                                "<span><strong class='me-2'>" + letter + ")</strong> " + escapeHtml(optText) + "</span>" +
+                                "</div>";
+                        }
+                    });
+                    reviewHtml += "</div>";
+
+                    reviewHtml += "<div class='mt-3 p-3 rounded bg-light border border-secondary border-opacity-25'>" +
+                        "<small class='d-block text-dark fw-bold mb-1'><i class='bi bi-lightbulb-fill text-warning me-1'></i> DOĞRU CEVAP AÇIKLAMASI:</small>" +
+                        "<small class='text-secondary d-block mb-2' style='line-height:1.5;'>" + escapeHtml(question.explanation || "") + "</small>";
+
+                    if (question.sourceHint) {
+                        reviewHtml += "<small class='d-block text-muted border-top pt-2 mt-2'><i class='bi bi-search text-primary me-1'></i> Kaynak İpucu: " + escapeHtml(question.sourceHint) + "</small>";
+                    }
+                    reviewHtml += "</div></div>";
+                });
+
+                $("#quizReview").html(reviewHtml);
+                $("#quizNextBtn").prop("disabled", true).text("Öğretmen İnceleme Modu").removeClass("btn-primary").addClass("btn-success");
+            }
+
+            // 🎯 KAYDEDİLMİŞ QUIZI ÇÖZ / İNCELE
             $(document).on("click", ".btn-solve-quiz", function () {
                 var quizId = $(this).data("quizid");
                 var courseId = $(this).data("courseid");
                 var docId = $(this).data("docid");
+                var isTeacherUser = @(isTeacherRole ? "true" : "false");
 
                 quizState.documentId = docId;
                 quizState.courseId = courseId;
@@ -772,7 +900,13 @@
                             quizState.questions = data.questions;
                             quizState.answers = new Array(data.questions.length).fill(null);
                             quizState.currentIndex = 0;
-                            renderQuizQuestion();
+
+                            // 🎯 ÖĞRETMEN TARAFINDA DİREKT CEVAP ANAHTARI GÖSTERİLİR, İŞARETLEME YAPILMAZ!
+                            if (isTeacherUser) {
+                                renderTeacherQuizAnswerKey(data.questions);
+                            } else {
+                                renderQuizQuestion();
+                            }
                         } else {
                             showQuizError(data.response || "Quiz yüklenemedi.");
                         }
@@ -781,6 +915,36 @@
                         showQuizError("Quiz verisi alınırken sunucu hatası oluştu.");
                     }
                 });
+            });
+
+            // 🎯 🎓 KART ÜZERİNDEN QUİZİ ÖĞRENCİLERE YAYINLA
+            $(document).on("click", ".btn-publish-quiz-card", function () {
+                var quizId = $(this).data("quizid");
+                if (confirm("Quiz #" + quizId + " numaralı quizi derse kayıtlı tüm öğrencilere göndermek ve yayınlamak istediğinize emin misiniz?")) {
+                    $.post('@Url.Action("PublishTeacherQuiz", "Course")', { quizId: quizId }, function (res) {
+                        if (res.success) {
+                            alert("✅ " + res.message);
+                            location.reload();
+                        } else {
+                            alert("⚠️ Hata: " + res.message);
+                        }
+                    });
+                }
+            });
+
+            // 🎯 🎓 KART ÜZERİNDEN QUİZİ YAYINDAN KALDIR (TASLAĞA ÇEK)
+            $(document).on("click", ".btn-unpublish-quiz-card", function () {
+                var quizId = $(this).data("quizid");
+                if (confirm("Quiz #" + quizId + " numaralı quizi yayından kaldırıp kişisel taslaklarınıza çekmek istediğinize emin misiniz?")) {
+                    $.post('@Url.Action("UnpublishTeacherQuiz", "Course")', { quizId: quizId }, function (res) {
+                        if (res.success) {
+                            alert("✅ " + res.message);
+                            location.reload();
+                        } else {
+                            alert("⚠️ Hata: " + res.message);
+                        }
+                    });
+                }
             });
 
             // 🎯 KAYDEDİLMİŞ QUIZI SİL
