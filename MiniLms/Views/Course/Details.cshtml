@@ -260,6 +260,20 @@
                             <audio id="summaryAudioPlayer" class="w-100 mt-2 d-none" controls></audio>
                         </div>
 
+                        <!-- 🎓 Eğitmen Onaylı Resmi Özet Banneri -->
+                        <div id="teacherPublishedBanner" class="alert alert-success d-none d-flex align-items-center justify-content-between p-3 rounded-4 mb-3 border-0 shadow-sm" style="background-color: #f0fdf4;">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="p-2.5 rounded-circle bg-success text-white fs-4">
+                                    <i class="bi bi-patch-check-fill"></i>
+                                </div>
+                                <div>
+                                    <h6 class="fw-bold text-success-emphasis mb-0">Eğitmen Onaylı Resmi Ders Özeti</h6>
+                                    <small class="text-secondary"><i class="bi bi-person-fill me-1"></i> <strong id="publishedTeacherName">Ders Öğretmeni</strong> tarafından düzenlenip derse kayıtlı öğrencilere yayınlandı • <span id="publishedTeacherDate"></span></small>
+                                </div>
+                            </div>
+                            <span class="badge bg-success rounded-pill px-3 py-2 fw-bold"><i class="bi bi-check-all me-1"></i> Öğretmen Onaylı</span>
+                        </div>
+
                         <div id="aiResponseText" class="lh-base" style="font-size: 0.95rem; max-height: 400px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin;"></div>
                     </div>
 
@@ -531,9 +545,12 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer py-2">
+            <div class="modal-footer py-2 justify-content-between">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
-                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnSaveEditedSummary"><i class="bi bi-check-circle"></i> Değişiklikleri Kaydet</button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm fw-bold" id="btnSaveEditedSummary"><i class="bi bi-save"></i> Taslak Olarak Kaydet</button>
+                    <button type="button" class="btn btn-success btn-sm fw-bold shadow-sm" id="btnPublishEditedSummaryToStudents"><i class="bi bi-send-fill me-1"></i> Düzenle & Öğrencilere Yayınla</button>
+                </div>
             </div>
         </div>
     </div>
@@ -702,10 +719,18 @@
                             $("#summaryBadge").removeClass("d-none");
                             $("#summaryActions").removeClass("d-none");
 
-                            if (data.isCached) {
-                                $("#summaryBadge").text("Kayıtlı Özet Yüklendi (ID: #" + data.summaryId + ")");
+                            if (data.isTeacherPublished) {
+                                $("#publishedTeacherName").text(data.publisherName || "Ders Öğretmeni");
+                                $("#publishedTeacherDate").text(data.publishedAt || "");
+                                $("#teacherPublishedBanner").removeClass("d-none");
+                                $("#summaryBadge").text("✨ Eğitmen Onaylı Resmi Özet (ID: #" + data.summaryId + ")");
                             } else {
-                                $("#summaryBadge").text("Yeni Özet Kaydedildi (ID: #" + data.summaryId + ")");
+                                $("#teacherPublishedBanner").addClass("d-none");
+                                if (data.isCached) {
+                                    $("#summaryBadge").text("Kayıtlı Özet Yüklendi (ID: #" + data.summaryId + ")");
+                                } else {
+                                    $("#summaryBadge").text("Yeni Özet Kaydedildi (ID: #" + data.summaryId + ")");
+                                }
                             }
                         }
                     } else {
@@ -1030,7 +1055,7 @@
             openEditModalWithSummary(activeSummaryState.summaryId, activeSummaryState.rawText);
         });
 
-        // 🎯 Düzenlenen Özeti Kaydet (Öğrenci veya Öğretmen)
+        // 🎯 Düzenlenen Özeti Kaydet (Taslak)
         $("#btnSaveEditedSummary").click(function () {
             var summaryId = $("#editSummaryId").val();
             var updatedText = quill.root.innerHTML;
@@ -1043,19 +1068,61 @@
             $.ajax({
                 url: '@Url.Action("UpdateSummary", "Course")',
                 type: 'POST',
-                data: { summaryId: summaryId, summaryText: updatedText },
+                data: { summaryId: summaryId, summaryText: updatedText, publishToStudents: false },
                 success: function (res) {
                     if (res.success) {
                         activeSummaryState.rawText = updatedText;
                         $("#aiResponseText").html(formatAiResponseToHtml(updatedText));
                         editSummaryModal.hide();
-                        alert("Özet (ID #" + summaryId + ") veritabanında başarıyla güncellendi.");
+                        alert("Özet veritabanında güncellendi.");
                     } else {
                         alert("Hata: " + res.message);
                     }
                 },
                 error: function () {
                     alert("Özet güncellenirken sunucu hatası oluştu.");
+                }
+            });
+        });
+
+        // 🎯 🎓 Düzenlenen Özeti Derse Kayıtlı Öğrencilere Yayınla
+        $("#btnPublishEditedSummaryToStudents").click(function () {
+            var summaryId = $("#editSummaryId").val();
+            var updatedText = quill.root.innerHTML;
+
+            if (!quill.getText().trim()) {
+                alert("Özet metni boş olamaz.");
+                return;
+            }
+
+            if (!confirm("Bu özeti onaylayıp derse kayıtlı tüm öğrencilerin erişimine yayınlamak istediğinize emin misiniz?")) {
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("UpdateSummary", "Course")',
+                type: 'POST',
+                data: { summaryId: summaryId, summaryText: updatedText, publishToStudents: true },
+                success: function (res) {
+                    if (res.success) {
+                        activeSummaryState.rawText = updatedText;
+                        $("#aiResponseText").html(formatAiResponseToHtml(updatedText));
+
+                        if (res.isTeacherPublished) {
+                            $("#publishedTeacherName").text(res.publisherName || "Ders Öğretmeni");
+                            $("#publishedTeacherDate").text(res.publishedAt || "");
+                            $("#teacherPublishedBanner").removeClass("d-none");
+                            $("#summaryBadge").text("✨ Eğitmen Onaylı Resmi Özet (ID: #" + res.summaryId + ")");
+                        }
+
+                        editSummaryModal.hide();
+                        alert(res.message || "Özet düzenlendi ve derse kayıtlı öğrencilere yayınlandı!");
+                    } else {
+                        alert("Hata: " + res.message);
+                    }
+                },
+                error: function () {
+                    alert("Özet yayınlanırken sunucu hatası oluştu.");
                 }
             });
         });

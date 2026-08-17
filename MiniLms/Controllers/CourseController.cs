@@ -434,9 +434,37 @@ YAPAY ZEKÂ DANIŞMAN KURALLARI:
                     currentUserId = firstStudent?.Id ?? "";
                 }
 
-                // 🎯 1. Eğer zorunlu yenileme istenmediyse, GİRİŞ YAPAN KULLANICININ bu dokümana ait kişisel özetini getir
+                // 🎯 1. Eğer zorunlu yenileme istenmediyse, önce ÖĞRETMEN TARAFINDAN ONAYLANIP ÖĞRENCİLERE YAYINLANMIŞ ÖZETİ GETİR
                 if (!forceRefresh)
                 {
+                    var teacherPublishedSummary = await _dbContext.DocumentSummaries
+                        .Include(s => s.PublishedByTeacher)
+                        .Include(s => s.User)
+                        .Where(s => s.CourseDocumentId == documentId && s.IsTeacherPublished)
+                        .OrderByDescending(s => s.PublishedAt ?? s.CreatedAt)
+                        .FirstOrDefaultAsync();
+
+                    if (teacherPublishedSummary != null)
+                    {
+                        var teacherUser = teacherPublishedSummary.PublishedByTeacher ?? teacherPublishedSummary.User;
+                        string teacherName = teacherUser != null ? $"{teacherUser.FirstName} {teacherUser.LastName}".Trim() : "Ders Öğretmeni";
+
+                        return Json(new { 
+                            success = true, 
+                            summaryId = teacherPublishedSummary.Id, 
+                            documentId = documentId,
+                            documentName = document.FileName,
+                            response = teacherPublishedSummary.SummaryText, 
+                            isCached = true,
+                            isTeacherPublished = true,
+                            publisherName = teacherName,
+                            publishedAt = (teacherPublishedSummary.PublishedAt ?? teacherPublishedSummary.CreatedAt).ToString("dd.MM.yyyy HH:mm"),
+                            authorName = teacherName,
+                            createdAt = teacherPublishedSummary.CreatedAt.ToString("dd.MM.yyyy HH:mm")
+                        });
+                    }
+
+                    // 🎯 1.B Öğretmen özeti henüz yayınlanmadıysa, GİRİŞ YAPAN KULLANICININ bu dokümana ait kişisel özetini getir
                     var existingSummary = await _dbContext.DocumentSummaries
                         .Include(s => s.User)
                         .Where(s => s.CourseDocumentId == documentId && s.UserId == currentUserId)
@@ -452,6 +480,7 @@ YAPAY ZEKÂ DANIŞMAN KURALLARI:
                             documentName = document.FileName,
                             response = existingSummary.SummaryText, 
                             isCached = true,
+                            isTeacherPublished = false,
                             authorName = existingSummary.User != null ? $"{existingSummary.User.FirstName} {existingSummary.User.LastName}".Trim() : "Sistem",
                             createdAt = existingSummary.CreatedAt.ToString("dd.MM.yyyy HH:mm")
                         });
@@ -724,16 +753,50 @@ DERS ÖZET METNİ:
 
         // 🎯 SADECE ÖĞRENCİLERE ÖZEL KİŞİSEL ÖZETLER SAYFASI (Sekme)
         [HttpGet]
-        [Authorize(Policy = UserPolicies.StudentOnly)]
+        [Authorize]
         public async Task<IActionResult> MySummaries()
         {
             var userId = _userManager.GetUserId(User);
+            var isTeacher = User.IsInRole("Teacher");
 
-            var summaries = await _dbContext.DocumentSummaries
+            List<DocumentSummary> teacherPublishedSummaries;
+
+            if (isTeacher)
+            {
+                // 🎓 Öğretmen İse: Kendisinin yayınladığı veya kendi derslerine ait onaylı özetleri getir
+                var teacherCourseIds = await _dbContext.Courses
+                    .Where(c => c.TeacherId == userId)
+                    .Select(c => c.Id)
+                    .ToListAsync();
+
+                teacherPublishedSummaries = await _dbContext.DocumentSummaries
+                    .Include(s => s.Course)
+                    .Include(s => s.CourseDocument)
+                    .Include(s => s.PublishedByTeacher)
+                    .Include(s => s.User)
+                    .Where(s => s.IsTeacherPublished && (s.PublishedByTeacherId == userId || teacherCourseIds.Contains(s.CourseId)))
+                    .OrderByDescending(s => s.PublishedAt ?? s.CreatedAt)
+                    .ToListAsync();
+            }
+            else
+            {
+                // 🎓 Öğrenci İse: Tüm onaylı yayınlanmış ders özetlerini getir
+                teacherPublishedSummaries = await _dbContext.DocumentSummaries
+                    .Include(s => s.Course)
+                    .Include(s => s.CourseDocument)
+                    .Include(s => s.PublishedByTeacher)
+                    .Include(s => s.User)
+                    .Where(s => s.IsTeacherPublished)
+                    .OrderByDescending(s => s.PublishedAt ?? s.CreatedAt)
+                    .ToListAsync();
+            }
+
+            // 📝 Kullanıcının kendi çıkardığı kişisel taslak AI özetleri
+            var personalSummaries = await _dbContext.DocumentSummaries
                 .Include(s => s.Course)
                 .Include(s => s.CourseDocument)
                 .Include(s => s.User)
-                .Where(s => s.UserId == userId)
+                .Where(s => s.UserId == userId && !s.IsTeacherPublished)
                 .OrderByDescending(s => s.CreatedAt)
                 .ToListAsync();
 
@@ -744,9 +807,11 @@ DERS ÖZET METNİ:
                 .OrderByDescending(q => q.CreatedAt)
                 .ToListAsync();
 
+            ViewBag.TeacherPublishedSummaries = teacherPublishedSummaries;
             ViewBag.SavedQuizzes = savedQuizzes;
+            ViewBag.IsTeacher = isTeacher;
 
-            return View(summaries);
+            return View(personalSummaries);
         }
 
         // 🎯 Özet ID ile tekil özet metnini getirme
@@ -775,9 +840,9 @@ DERS ÖZET METNİ:
             });
         }
 
-        // 🎯 Öğrenci ve Öğretmenlerin Özeti Düzenlemesi (Edit)
+        // 🎯 Öğrenci ve Öğretmenlerin Özeti Düzenlemesi / Yayınlaması (Edit & Publish)
         [HttpPost]
-        public async Task<IActionResult> UpdateSummary(int summaryId, string summaryText)
+        public async Task<IActionResult> UpdateSummary(int summaryId, string summaryText, bool publishToStudents = false)
         {
             try
             {
@@ -792,17 +857,119 @@ DERS ÖZET METNİ:
                     return Json(new { success = false, message = "Özet metni boş olamaz." });
                 }
 
+                var currentUserId = _userManager.GetUserId(User);
+                var isTeacher = User.IsInRole("Teacher");
+
+                // Öğretmen dersin sorumlusu mu?
+                var course = await _dbContext.Courses.FirstOrDefaultAsync(c => c.Id == summary.CourseId);
+                if (course != null && course.TeacherId == currentUserId)
+                {
+                    isTeacher = true;
+                }
+
                 summary.SummaryText = summaryText;
                 summary.CreatedAt = DateTime.Now;
+
+                // 🎯 Sadece öğretmen açıkça 'Öğrencilere Yayınla' dediyse yayınla!
+                if (publishToStudents)
+                {
+                    summary.IsTeacherPublished = true;
+                    summary.PublishedByTeacherId = currentUserId;
+                    summary.PublishedAt = DateTime.Now;
+                    // Eğer ses dosyası varsa yeni metinle yeniden üretilmesi için sıfırla
+                    summary.AudioFilePath = null;
+                }
 
                 _dbContext.DocumentSummaries.Update(summary);
                 await _dbContext.SaveChangesAsync();
 
-                return Json(new { success = true, summaryId = summary.Id, message = "Özet başarıyla güncellendi.", response = summaryText });
+                var teacherUser = await _userManager.FindByIdAsync(summary.PublishedByTeacherId ?? currentUserId ?? "");
+                string teacherName = teacherUser != null ? $"{teacherUser.FirstName} {teacherUser.LastName}".Trim() : "Ders Öğretmeni";
+
+                string msg = summary.IsTeacherPublished
+                    ? "Özet başarıyla düzenlendi ve derse kayıtlı tüm öğrencilerin erişimine yayınlandı!"
+                    : "Özet taslağı başarıyla güncellendi.";
+
+                return Json(new { 
+                    success = true, 
+                    summaryId = summary.Id, 
+                    isTeacherPublished = summary.IsTeacherPublished,
+                    publisherName = teacherName,
+                    publishedAt = (summary.PublishedAt ?? DateTime.Now).ToString("dd.MM.yyyy HH:mm"),
+                    message = msg, 
+                    response = summaryText 
+                });
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, message = $"Özet güncellenirken hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 Öğretmenin Kişisel Özeti Doğrudan Öğrencilere Yayınlaması
+        [HttpPost]
+        public async Task<IActionResult> PublishSummaryById(int summaryId)
+        {
+            try
+            {
+                var summary = await _dbContext.DocumentSummaries.FindAsync(summaryId);
+                if (summary == null)
+                {
+                    return Json(new { success = false, message = "Yayınlanacak özet bulunamadı." });
+                }
+
+                var currentUserId = _userManager.GetUserId(User);
+                var isTeacher = User.IsInRole("Teacher");
+                var course = await _dbContext.Courses.FirstOrDefaultAsync(c => c.Id == summary.CourseId);
+                if (course != null && course.TeacherId == currentUserId)
+                {
+                    isTeacher = true;
+                }
+
+                if (!isTeacher)
+                {
+                    return Json(new { success = false, message = "Yalnızca ders öğretmenleri öğrencilere özet yayınlayabilir." });
+                }
+
+                summary.IsTeacherPublished = true;
+                summary.PublishedByTeacherId = currentUserId;
+                summary.PublishedAt = DateTime.Now;
+
+                _dbContext.DocumentSummaries.Update(summary);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, message = "Özet başarıyla onaylandı ve derse kayıtlı tüm öğrencilerin erişimine yayınlandı!" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Özet yayınlanırken hata oluştu: {ex.Message}" });
+            }
+        }
+
+        // 🎯 Öğretmenin Yayınlanmış Özeti Yayından Kaldırması (Taslağa Çekmesi)
+        [HttpPost]
+        public async Task<IActionResult> UnpublishSummaryById(int summaryId)
+        {
+            try
+            {
+                var summary = await _dbContext.DocumentSummaries.FindAsync(summaryId);
+                if (summary == null)
+                {
+                    return Json(new { success = false, message = "Özet bulunamadı." });
+                }
+
+                summary.IsTeacherPublished = false;
+                summary.PublishedByTeacherId = null;
+                summary.PublishedAt = null;
+
+                _dbContext.DocumentSummaries.Update(summary);
+                await _dbContext.SaveChangesAsync();
+
+                return Json(new { success = true, message = "Özet yayından kaldırıldı ve kişisel taslaklara taşındı!" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Özet yayından kaldırılırken hata oluştu: {ex.Message}" });
             }
         }
 

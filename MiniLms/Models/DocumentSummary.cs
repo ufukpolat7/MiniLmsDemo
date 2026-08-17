@@ -26,5 +26,11 @@ namespace MiniLms.Models
 
         // Çıkarılma Tarihi
         public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+        // Öğretmen Tarafından Düzenlenip Öğrencilere Yayınlandı Mı?
+        public bool IsTeacherPublished { get; set; } = false;
+        public string? PublishedByTeacherId { get; set; }
+        public ApplicationUser? PublishedByTeacher { get; set; }
+        public DateTime? PublishedAt { get; set; }
     }
 }

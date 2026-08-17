@@ -164,6 +164,18 @@ using (var scope = app.Services.CreateScope())
                     [WrongCount] int NOT NULL DEFAULT 1
                 );
             END;
+
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[DocumentSummaries]') AND name = 'IsTeacherPublished'
+            )
+            BEGIN
+                ALTER TABLE [DocumentSummaries] ADD [IsTeacherPublished] bit NOT NULL DEFAULT 0;
+                ALTER TABLE [DocumentSummaries] ADD [PublishedByTeacherId] nvarchar(450) NULL;
+                ALTER TABLE [DocumentSummaries] ADD [PublishedAt] datetime2 NULL;
+            END;
+
+            UPDATE [LessonContents] SET [IsIndexed] = 0;
         ");
     }
     catch (Exception ex)

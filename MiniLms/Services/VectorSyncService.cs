@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MiniLms.Interfaces;
 using MiniLms.Models; // Modelleri kesin olarak tanıması için bu using şarttır
@@ -58,17 +58,22 @@ namespace MiniLms.Services
                             if (vector != null)
                             {
                                 // Qdrant Vector DB'ye kaydet
-                                await _vectorDbService.SaveVectorAsync(
+                                bool saved = await _vectorDbService.SaveVectorAsync(
                                     collectionName: "lesson_contents",
-                                    contentId: content.Id,       // Artık altı çizilmeyecek
-                                    lessonId: content.LessonId, // Artık altı çizilmeyecek
+                                    contentId: content.Id,
+                                    lessonId: content.LessonId,
                                     vector: vector,
                                     originalText: textToEmbed
                                 );
 
-                                // MySQL tarafında işaretle
-                                await repo.MarkAsIndexedAsync(content.Id);
+                                if (saved)
+                                {
+                                    await repo.MarkAsIndexedAsync(content.Id);
+                                }
                             }
+
+                            // Google Gemini API Rate Limit (429) engeline takılmamak için her istek arası 1.5 sn bekle
+                            await Task.Delay(1500, stoppingToken);
                         }
                     }
                 }

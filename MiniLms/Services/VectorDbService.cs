@@ -49,45 +49,98 @@ namespace MiniLms.Services
             }
         }
 
-        public async Task EnsureCollectionExistsAsync(string collectionName)
+        public async Task EnsureCollectionExistsAsync(string collectionName, int vectorSize = 768)
         {
             var checkResponse = await _httpClient.GetAsync($"{_baseUrl}/collections/{collectionName}");
-            if (checkResponse.IsSuccessStatusCode) return; // Koleksiyon zaten var
+            if (checkResponse.IsSuccessStatusCode)
+            {
+                string json = await checkResponse.Content.ReadAsStringAsync();
+                try
+                {
+                    using (var doc = JsonDocument.Parse(json))
+                    {
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("result", out var res) &&
+                            res.TryGetProperty("config", out var cfg) &&
+                            cfg.TryGetProperty("params", out var pms) &&
+                            pms.TryGetProperty("vectors", out var vec))
+                        {
+                            int currentSize = 0;
+                            if (vec.ValueKind == JsonValueKind.Object && vec.TryGetProperty("size", out var sizeProp))
+                            {
+                                currentSize = sizeProp.GetInt32();
+                            }
 
-            // Gemini embedding modeli 768 boyutludur ve mesafe ölçümü için Cosine en idealidir
+                            if (currentSize > 0 && currentSize != vectorSize)
+                            {
+                                _logger.LogWarning("Qdrant koleksiyon boyutu uyuşmuyor ({Current} != {New}). Koleksiyon yeniden oluşturuluyor...", currentSize, vectorSize);
+                                await _httpClient.DeleteAsync($"{_baseUrl}/collections/{collectionName}");
+                            }
+                            else
+                            {
+                                return; // Boyut doğru ve koleksiyon mevcut
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Koleksiyon boyutu kontrolü sırasında hata oluştu, varsayılan akışa devam ediliyor.");
+                }
+            }
+
             var createPayload = new
             {
-                vectors = new { size = 768, distance = "Cosine" }
+                vectors = new { size = vectorSize, distance = "Cosine" }
             };
 
             var content = new StringContent(JsonSerializer.Serialize(createPayload), Encoding.UTF8, "application/json");
             await _httpClient.PutAsync($"{_baseUrl}/collections/{collectionName}", content);
         }
 
-        public async Task SaveVectorAsync(string collectionName, int contentId, int lessonId, List<float> vector, string originalText)
+        public async Task<bool> SaveVectorAsync(string collectionName, int contentId, int lessonId, List<float> vector, string originalText)
         {
-            await EnsureCollectionExistsAsync(collectionName);
-
-            var uploadPayload = new
+            try
             {
-                points = new[]
+                int dimension = (vector != null && vector.Count > 0) ? vector.Count : 768;
+                await EnsureCollectionExistsAsync(collectionName, dimension);
+
+                var uploadPayload = new
                 {
-                    new
+                    points = new[]
                     {
-                        id = Guid.NewGuid().ToString(), // Benzersiz nokta ID'si
-                        vector = vector,
-                        payload = new
+                        new
                         {
-                            contentId = contentId,
-                            lessonId = lessonId,
-                            text = originalText
+                            id = contentId,
+                            vector = vector,
+                            payload = new
+                            {
+                                contentId = contentId,
+                                lessonId = lessonId,
+                                text = originalText
+                            }
                         }
                     }
-                }
-            };
+                };
 
-            var content = new StringContent(JsonSerializer.Serialize(uploadPayload), Encoding.UTF8, "application/json");
-            await _httpClient.PostAsync($"{_baseUrl}/collections/{collectionName}/points?wait=true", content);
+                var content = new StringContent(JsonSerializer.Serialize(uploadPayload), Encoding.UTF8, "application/json");
+                var response = await _httpClient.PutAsync($"{_baseUrl}/collections/{collectionName}/points?wait=true", content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("Qdrant SaveVector error. Status: {Status}, Error: {Err}", response.StatusCode, errContent);
+                    return false;
+                }
+
+                _logger.LogInformation("Qdrant Cloud: Vektör nokta {Id} (Boyut: {Dim}) başarıyla eklendi!", contentId, dimension);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Qdrant SaveVector exception.");
+                return false;
+            }
         }
 
         public async Task<List<string>> SearchSimilarTextsAsync(string collectionName, List<float> vectorData, int limit = 3)
