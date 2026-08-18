@@ -186,6 +186,14 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE [SavedQuizzes] ADD [PublishedAt] datetime2 NULL;
             END;
 
+            IF NOT EXISTS (
+                SELECT * FROM sys.columns 
+                WHERE object_id = OBJECT_ID(N'[SavedQuizzes]') AND name = 'TeacherNote'
+            )
+            BEGIN
+                ALTER TABLE [SavedQuizzes] ADD [TeacherNote] nvarchar(max) NULL;
+            END;
+
             UPDATE [LessonContents] SET [IsIndexed] = 0;
         ");
     }

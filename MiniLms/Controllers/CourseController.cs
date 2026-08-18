@@ -1090,9 +1090,9 @@ DERS ÖZET METNİ:
             }
         }
 
-        // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama, Konu Odağı ve Öğretmen Yayınlama Destekli)
+        // 🎯 Etkileşimli Doküman Quiz Oturumu Endpoint'i (Önbellekleme, ID Atama, Konu Odağı, Öğretmen Notu ve Öğretmen Yayınlama Destekli)
         [HttpGet]
-        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = true, int? quizId = null, string? topicFocus = null, bool publishToStudents = false)
+        public async Task<IActionResult> DocumentQuizSession(int courseId, int documentId, int questionCount = 5, string difficulty = "mixed", bool forceRefresh = true, int? quizId = null, string? topicFocus = null, bool publishToStudents = false, string? teacherNote = null)
         {
             try
             {
@@ -1124,6 +1124,7 @@ DERS ÖZET METNİ:
                             isCached = true,
                             isTeacherPublished = savedQuiz.IsTeacherPublished,
                             topicFocus = savedQuiz.TopicFocus,
+                            teacherNote = savedQuiz.TeacherNote,
                             questions = quizQuestions
                         });
                     }
@@ -1160,6 +1161,8 @@ DERS ÖZET METNİ:
                                 sourceFileName = existingQuiz.SourceFileName,
                                 isCached = true,
                                 isTeacherPublished = existingQuiz.IsTeacherPublished,
+                                topicFocus = existingQuiz.TopicFocus,
+                                teacherNote = existingQuiz.TeacherNote,
                                 questions = cachedQuestions
                             });
                         }
@@ -1168,19 +1171,15 @@ DERS ÖZET METNİ:
 
                 // 🎯 3. Kayıtlı quiz yoksa veya forceRefresh == true ise yeni quiz üret!
                 var documentTexts = await _courseDocumentService.GetDocumentTextChunksAsync(documentId, maxChunks: 8);
-                if (documentTexts.Count == 0)
+                if (documentTexts == null || !documentTexts.Any())
                 {
-                    return Json(new { success = false, response = "Bu dokümandan quiz üretilecek metin çıkarılamadı." });
+                    return Json(new { success = false, response = "Doküman içeriği okunamadı veya metin parçaları boş." });
                 }
 
                 var questions = await BuildInteractiveDocumentQuizAsync(document.FileName, documentTexts, questionCount, difficulty, topicFocus);
-                if (questions.Count == 0)
+                if (questions == null || !questions.Any())
                 {
-                    return Json(new
-                    {
-                        success = false,
-                        response = "Bu dokümandan kaliteli quiz sorusu çıkarılamadı. Dokümanda daha açıklayıcı metinler olduğundan emin olun."
-                    });
+                    return Json(new { success = false, response = "Doküman içeriğinden geçerli quiz soruları üretilemedi." });
                 }
 
                 // 🎯 4. Üretilen quizi veritabanına kaydet ve ID ata!
@@ -1204,6 +1203,7 @@ DERS ÖZET METNİ:
                     newQuiz.IsTeacherPublished = true;
                     newQuiz.PublishedByTeacherId = userId;
                     newQuiz.PublishedAt = DateTime.Now;
+                    newQuiz.TeacherNote = !string.IsNullOrWhiteSpace(teacherNote) ? teacherNote.Trim() : null;
                 }
 
                 _dbContext.SavedQuizzes.Add(newQuiz);
@@ -1215,6 +1215,7 @@ DERS ÖZET METNİ:
                     quizId = newQuiz.Id,
                     title = newQuiz.Title,
                     isTeacherPublished = newQuiz.IsTeacherPublished,
+                    teacherNote = newQuiz.TeacherNote,
                     questions
                 });
             }
@@ -1226,7 +1227,7 @@ DERS ÖZET METNİ:
 
         // 🎯 Öğretmenin Hazırladığı Quizi Derse Kayıtlı Tüm Öğrencilere Göndermesi / Yayınlaması
         [HttpPost]
-        public async Task<IActionResult> PublishTeacherQuiz(int quizId)
+        public async Task<IActionResult> PublishTeacherQuiz(int quizId, string? teacherNote = null)
         {
             try
             {
@@ -1252,6 +1253,10 @@ DERS ÖZET METNİ:
                 quiz.IsTeacherPublished = true;
                 quiz.PublishedByTeacherId = currentUserId;
                 quiz.PublishedAt = DateTime.Now;
+                if (!string.IsNullOrWhiteSpace(teacherNote))
+                {
+                    quiz.TeacherNote = teacherNote.Trim();
+                }
 
                 _dbContext.SavedQuizzes.Update(quiz);
                 await _dbContext.SaveChangesAsync();

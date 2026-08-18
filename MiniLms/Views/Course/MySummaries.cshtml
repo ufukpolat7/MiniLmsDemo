@@ -220,6 +220,12 @@
                                                                         🎯 Konu Odağı: @quiz.TopicFocus
                                                                     </div>
                                                                 }
+                                                                @if (!string.IsNullOrWhiteSpace(quiz.TeacherNote))
+                                                                {
+                                                                    <div class="alert alert-info border-0 bg-info bg-opacity-10 text-info-emphasis small py-1 px-2 mb-2 rounded-2" style="font-size: 0.8rem;">
+                                                                        <i class="bi bi-chat-left-quote-fill text-info me-1"></i> <strong>Öğretmen Notu:</strong> @quiz.TeacherNote
+                                                                    </div>
+                                                                }
                                                                 <small class="text-muted d-block"><i class="bi bi-question-circle me-1"></i> Toplam @quiz.QuestionCount Soru Hazır</small>
                                                             </div>
                                                             <div class="card-footer bg-white border-0 pt-0 pb-3 d-flex justify-content-between align-items-center">
@@ -455,8 +461,14 @@
                                 <option value="hard">Zor</option>
                             </select>
                         </div>
-                        <div class="col-sm-3">
-                            <button type="button" class="btn btn-primary btn-sm w-100" id="quizStartBtn">Başlat</button>
+                </div>
+
+                <div id="quizTeacherNoteBanner" class="alert alert-info border-info d-none mb-3 py-2 px-3 rounded-3 shadow-xs">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-chat-left-quote text-info fs-5"></i>
+                        <div>
+                            <strong class="small text-info-emphasis d-block mb-0">Öğretmen Notu / Açıklama:</strong>
+                            <span class="small text-dark fw-semibold" id="quizTeacherNoteText"></span>
                         </div>
                     </div>
                 </div>
@@ -480,6 +492,20 @@
                 <div id="quizResultArea" class="d-none text-center py-4">
                     <div class="quiz-score" id="quizScoreText"></div>
                     <p class="text-muted mb-3" id="quizScoreDetail"></p>
+
+                    @if (isTeacherRole)
+                    {
+                        <div id="teacherNoteEditArea" class="p-3 mb-3 bg-white border border-primary border-opacity-50 rounded-3 text-start shadow-xs">
+                            <label class="form-label small fw-bold text-primary mb-1">
+                                <i class="bi bi-chat-left-quote-fill me-1"></i> Öğretmen Notu / Öğrencilere İletilecek Mesaj <span class="fw-normal text-muted">(Opsiyonel)</span>
+                            </label>
+                            <input type="text" class="form-control form-control-sm" id="quizTeacherNote" placeholder="Soruları inceledikten sonra öğrencilerinize iletmek istediğiniz notu buraya yazabilirsiniz..." />
+                            <small class="text-muted mt-1 d-block" style="font-size: 11px;">
+                                <i class="bi bi-info-circle me-1"></i> Soruları inceledikten sonra notunuzu yazıp quizi yayınlayabilirsiniz.
+                            </small>
+                        </div>
+                    }
+
                     <div id="quizReview" class="text-start"></div>
                 </div>
             </div>
@@ -897,6 +923,15 @@
                                 $("#quizProgressText").html("<span class='text-primary fw-bold'><i class='bi bi-file-earmark-pdf-fill text-danger me-1'></i> Kaynak PDF: " + escapeHtml(data.sourceFileName) + "</span>");
                             }
 
+                            if (data.teacherNote) {
+                                $("#quizTeacherNoteText").text(data.teacherNote);
+                                $("#quizTeacherNoteBanner").removeClass("d-none");
+                                $("#quizTeacherNote").val(data.teacherNote);
+                            } else {
+                                $("#quizTeacherNoteBanner").addClass("d-none");
+                                $("#quizTeacherNote").val("");
+                            }
+
                             quizState.questions = data.questions;
                             quizState.answers = new Array(data.questions.length).fill(null);
                             quizState.currentIndex = 0;
@@ -920,16 +955,17 @@
             // 🎯 🎓 KART ÜZERİNDEN QUİZİ ÖĞRENCİLERE YAYINLA
             $(document).on("click", ".btn-publish-quiz-card", function () {
                 var quizId = $(this).data("quizid");
-                if (confirm("Quiz #" + quizId + " numaralı quizi derse kayıtlı tüm öğrencilere göndermek ve yayınlamak istediğinize emin misiniz?")) {
-                    $.post('@Url.Action("PublishTeacherQuiz", "Course")', { quizId: quizId }, function (res) {
-                        if (res.success) {
-                            alert("✅ " + res.message);
-                            location.reload();
-                        } else {
-                            alert("⚠️ Hata: " + res.message);
-                        }
-                    });
-                }
+                var note = prompt("Öğrencilere bu quiz ile birlikte iletmek istediğiniz notu/açıklamayı yazabilirsiniz (Opsiyonel):");
+                if (note === null) return; // İptal edildi
+
+                $.post('@Url.Action("PublishTeacherQuiz", "Course")', { quizId: quizId, teacherNote: note }, function (res) {
+                    if (res.success) {
+                        alert("✅ " + res.message);
+                        location.reload();
+                    } else {
+                        alert("⚠️ Hata: " + res.message);
+                    }
+                });
             });
 
             // 🎯 🎓 KART ÜZERİNDEN QUİZİ YAYINDAN KALDIR (TASLAĞA ÇEK)

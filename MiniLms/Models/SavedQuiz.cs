@@ -30,5 +30,6 @@ namespace MiniLms.Models
         public string? PublishedByTeacherId { get; set; }
         public ApplicationUser? PublishedByTeacher { get; set; }
         public DateTime? PublishedAt { get; set; }
+        public string? TeacherNote { get; set; }
     }
 }
