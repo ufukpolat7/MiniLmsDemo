@@ -1707,12 +1707,13 @@
             var score = 0;
             var reviewHtml = "";
 
+            var isTeacherUser = @(User.IsInRole("Teacher") || Model.TeacherId == User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ? "true" : "false");
             quizState.questions.forEach(function (question, index) {
                 var userAnswer = quizState.answers[index];
                 var isCorrect = userAnswer === question.correctIndex;
                 if (isCorrect) {
                     score++;
-                } else {
+                } else if (!isTeacherUser) {
                     var selectedOptText = (userAnswer !== null && question.options && question.options[userAnswer]) ? question.options[userAnswer] : "Yanıtlanmadı";
                     var correctOptText = (question.options && question.options[question.correctIndex]) ? question.options[question.correctIndex] : "";
                     
@@ -1721,7 +1722,7 @@
                         type: 'POST',
                         contentType: 'application/json',
                         data: JSON.stringify({
-                            courseId: parseInt('@Model.Id'),
+                            courseId: parseInt(quizState.courseId || '@Model.Id'),
                             courseDocumentId: parseInt(quizState.documentId || 0),
                             questionText: question.question,
                             selectedAnswer: selectedOptText,

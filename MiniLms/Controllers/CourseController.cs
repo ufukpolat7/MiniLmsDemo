@@ -1112,21 +1112,25 @@ DERS ÖZET METNİ:
                         .Include(q => q.CourseDocument)
                         .FirstOrDefaultAsync(q => q.Id == quizId.Value);
 
-                    if (savedQuiz != null)
+                    if (savedQuiz != null && !string.IsNullOrWhiteSpace(savedQuiz.QuestionsJson))
                     {
-                        var quizQuestions = JsonSerializer.Deserialize<List<QuizQuestionDto>>(savedQuiz.QuestionsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<QuizQuestionDto>();
-                        return Json(new
+                        var quizQuestions = TryParseQuizJson(savedQuiz.QuestionsJson, 50);
+                        if (quizQuestions.Count > 0)
                         {
-                            success = true,
-                            quizId = savedQuiz.Id,
-                            title = $"{savedQuiz.SourceFileName} Quiz (ID: #{savedQuiz.Id})",
-                            sourceFileName = savedQuiz.SourceFileName,
-                            isCached = true,
-                            isTeacherPublished = savedQuiz.IsTeacherPublished,
-                            topicFocus = savedQuiz.TopicFocus,
-                            teacherNote = savedQuiz.TeacherNote,
-                            questions = quizQuestions
-                        });
+                            string docFileName = !string.IsNullOrWhiteSpace(savedQuiz.SourceFileName) ? savedQuiz.SourceFileName : (savedQuiz.CourseDocument?.FileName ?? "Doküman");
+                            return Json(new
+                            {
+                                success = true,
+                                quizId = savedQuiz.Id,
+                                title = !string.IsNullOrWhiteSpace(savedQuiz.Title) ? savedQuiz.Title : $"{docFileName} Quiz (ID: #{savedQuiz.Id})",
+                                sourceFileName = docFileName,
+                                isCached = true,
+                                isTeacherPublished = savedQuiz.IsTeacherPublished,
+                                topicFocus = savedQuiz.TopicFocus,
+                                teacherNote = savedQuiz.TeacherNote,
+                                questions = quizQuestions
+                            });
+                        }
                     }
                 }
 
@@ -1143,6 +1147,7 @@ DERS ÖZET METNİ:
                 if (!forceRefresh)
                 {
                     var existingQuiz = await _dbContext.SavedQuizzes
+                        .Include(q => q.CourseDocument)
                         .Where(q => q.CourseDocumentId == documentId && (q.UserId == userId || q.IsTeacherPublished))
                         .OrderByDescending(q => q.IsTeacherPublished)
                         .ThenByDescending(q => q.CreatedAt)
@@ -1150,15 +1155,16 @@ DERS ÖZET METNİ:
 
                     if (existingQuiz != null && !string.IsNullOrWhiteSpace(existingQuiz.QuestionsJson))
                     {
-                        var cachedQuestions = JsonSerializer.Deserialize<List<QuizQuestionDto>>(existingQuiz.QuestionsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<QuizQuestionDto>();
+                        var cachedQuestions = TryParseQuizJson(existingQuiz.QuestionsJson, 50);
                         if (cachedQuestions.Count > 0)
                         {
+                            string docFileName = !string.IsNullOrWhiteSpace(existingQuiz.SourceFileName) ? existingQuiz.SourceFileName : (existingQuiz.CourseDocument?.FileName ?? document.FileName);
                             return Json(new
                             {
                                 success = true,
                                 quizId = existingQuiz.Id,
-                                title = $"{existingQuiz.SourceFileName} Quiz (ID: #{existingQuiz.Id})",
-                                sourceFileName = existingQuiz.SourceFileName,
+                                title = !string.IsNullOrWhiteSpace(existingQuiz.Title) ? existingQuiz.Title : $"{docFileName} Quiz (ID: #{existingQuiz.Id})",
+                                sourceFileName = docFileName,
                                 isCached = true,
                                 isTeacherPublished = existingQuiz.IsTeacherPublished,
                                 topicFocus = existingQuiz.TopicFocus,
@@ -1832,6 +1838,36 @@ DOKÜMAN METNİ:
             if (string.IsNullOrEmpty(userId))
             {
                 return Unauthorized();
+            }
+
+            // 🎯 Eğer CourseId 0 gönderildiyse ve CourseDocumentId varsa dokümandan CourseId bul
+            if (dto.CourseId == 0 && dto.CourseDocumentId > 0)
+            {
+                var doc = await _dbContext.CourseDocuments.FindAsync(dto.CourseDocumentId);
+                if (doc != null)
+                {
+                    dto.CourseId = doc.CourseId;
+                }
+            }
+
+            // 🎯 Eğer hala CourseId 0 ise öğrencinin ilk dersini ata
+            if (dto.CourseId == 0)
+            {
+                var userObj = await _userManager.FindByIdAsync(userId);
+                var studentRecord = userObj != null ? await _dbContext.Students.FirstOrDefaultAsync(s => s.Email == userObj.Email) : null;
+                var firstEnrollment = studentRecord != null ? await _dbContext.Enrollments.FirstOrDefaultAsync(e => e.StudentId == studentRecord.Id) : null;
+                if (firstEnrollment != null)
+                {
+                    dto.CourseId = firstEnrollment.CourseId;
+                }
+                else
+                {
+                    var firstCourse = await _dbContext.Courses.FirstOrDefaultAsync();
+                    if (firstCourse != null)
+                    {
+                        dto.CourseId = firstCourse.Id;
+                    }
+                }
             }
 
             var existingGap = await _dbContext.StudentKnowledgeGaps

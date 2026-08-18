@@ -461,6 +461,10 @@
                                 <option value="hard">Zor</option>
                             </select>
                         </div>
+                        <div class="col-sm-3">
+                            <button type="button" class="btn btn-primary btn-sm w-100" id="quizStartBtn">Başlat</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="quizTeacherNoteBanner" class="alert alert-info border-info d-none mb-3 py-2 px-3 rounded-3 shadow-xs">
@@ -791,11 +795,31 @@
             function renderQuizResult() {
                 var score = 0;
                 var reviewHtml = "";
+                var isTeacherUser = @(isTeacherRole ? "true" : "false");
 
                 quizState.questions.forEach(function (question, index) {
                     var userAnswer = quizState.answers[index];
                     var isCorrect = userAnswer === question.correctIndex;
-                    if (isCorrect) score++;
+                    if (isCorrect) {
+                        score++;
+                    } else if (!isTeacherUser) {
+                        var selectedOptText = (userAnswer !== null && question.options && question.options[userAnswer]) ? question.options[userAnswer] : "Yanıtlanmadı";
+                        var correctOptText = (question.options && question.options[question.correctIndex]) ? question.options[question.correctIndex] : "";
+                        
+                        $.ajax({
+                            url: '@Url.Action("RecordWrongAnswer", "Course")',
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({
+                                courseId: parseInt(quizState.courseId || 0),
+                                courseDocumentId: parseInt(quizState.documentId || 0),
+                                questionText: question.question,
+                                selectedAnswer: selectedOptText,
+                                correctAnswer: correctOptText,
+                                topicName: question.topic || "Genel Konu"
+                            })
+                        });
+                    }
 
                     reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + " position-relative shadow-sm'>";
                     reviewHtml += "<div class='position-absolute top-0 end-0 m-3 d-flex align-items-center gap-1'>" + getDifficultyDotHtml(question.difficulty) + "</div>";
