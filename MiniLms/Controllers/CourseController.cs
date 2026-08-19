@@ -1970,6 +1970,291 @@ DOKÜMAN METNİ:
             return Json(new { success = false, message = "Kayıt bulunamadı." });
         }
 
+        public class GenerateGapQuizRequestDto
+        {
+            public int? CourseId { get; set; }
+            public string? TopicName { get; set; }
+            public int QuestionCount { get; set; } = 5;
+            public string Difficulty { get; set; } = "mixed";
+        }
+
+        // POST: Course/GenerateGapQuiz (Eksik Konulardan / Yanlışlardan AI Quiz Üretme)
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> GenerateGapQuiz([FromBody] GenerateGapQuizRequestDto dto)
+        {
+            var userId = _userManager.GetUserId(User);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized();
+            }
+
+            int count = Math.Clamp(dto?.QuestionCount ?? 5, 3, 10);
+            string difficulty = NormalizeDifficulty(dto?.Difficulty);
+
+            var query = _dbContext.StudentKnowledgeGaps
+                .Include(g => g.Course)
+                .Include(g => g.Document)
+                .Where(g => g.UserId == userId);
+
+            if (dto?.CourseId.HasValue == true && dto.CourseId.Value > 0)
+            {
+                query = query.Where(g => g.CourseId == dto.CourseId.Value);
+            }
+
+            var gaps = await query.ToListAsync();
+
+            if (!string.IsNullOrWhiteSpace(dto?.TopicName))
+            {
+                string targetTopic = dto.TopicName.Trim();
+                gaps = gaps.Where(g =>
+                    string.Equals(g.TopicName?.Trim(), targetTopic, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(GetSemanticTopicCluster(g.TopicName), targetTopic, StringComparison.OrdinalIgnoreCase) ||
+                    (g.TopicName != null && g.TopicName.Contains(targetTopic, StringComparison.OrdinalIgnoreCase))
+                ).ToList();
+            }
+
+            if (!gaps.Any())
+            {
+                return Json(new { success = false, response = "Seçilen filtre için henüz kaydedilmiş bir eksik konu/yanlış soru bulunamadı." });
+            }
+
+            string quizTitle = !string.IsNullOrWhiteSpace(dto?.TopicName)
+                ? $"🎯 '{dto.TopicName}' Eksik Konu Pekiştirme Quizi"
+                : (dto?.CourseId.HasValue == true && dto.CourseId.Value > 0
+                    ? $"🔥 {gaps.FirstOrDefault()?.Course?.CourseCode ?? "Ders"} Eksik Konulardan Karışık Quiz"
+                    : "🚀 Tüm Derslerin Eksiklerinden Genel Karışık Quiz");
+
+            var questions = await BuildKnowledgeGapQuizAsync(gaps, count, difficulty, quizTitle, dto?.TopicName);
+
+            var firstDoc = gaps.FirstOrDefault(g => g.CourseDocumentId > 0)?.Document;
+            int docId = firstDoc?.Id ?? 0;
+            string docName = firstDoc?.FileName ?? "Eksik Konular Analiz Dokümanı";
+            int courseId = dto?.CourseId ?? gaps.FirstOrDefault()?.CourseId ?? 0;
+
+            if (docId == 0)
+            {
+                docId = await _dbContext.CourseDocuments.Select(d => d.Id).FirstOrDefaultAsync();
+            }
+
+            var newQuiz = new SavedQuiz
+            {
+                UserId = userId,
+                CourseId = courseId,
+                CourseDocumentId = docId > 0 ? docId : 1,
+                Title = quizTitle,
+                QuestionsJson = JsonSerializer.Serialize(questions),
+                QuestionCount = questions.Count,
+                Difficulty = difficulty,
+                TopicFocus = dto?.TopicName ?? "Eksik Konular",
+                SourceFileName = docName,
+                CreatedAt = DateTime.Now,
+                IsTeacherPublished = false
+            };
+
+            _dbContext.SavedQuizzes.Add(newQuiz);
+            await _dbContext.SaveChangesAsync();
+
+            return Json(new
+            {
+                success = true,
+                quizId = newQuiz.Id,
+                courseId = courseId,
+                documentId = docId,
+                title = quizTitle,
+                sourceFileName = docName,
+                questions = questions
+            });
+        }
+
+        private async Task<List<QuizQuestionDto>> BuildKnowledgeGapQuizAsync(List<StudentKnowledgeGap> gaps, int questionCount, string difficulty, string quizTitle, string? targetTopic = null)
+        {
+            var gapItems = gaps.Select(g => new
+            {
+                Topic = !string.IsNullOrWhiteSpace(targetTopic) ? targetTopic : g.TopicName,
+                Question = g.QuestionText,
+                UserWrongChoice = g.SelectedAnswer,
+                CorrectAnswer = g.CorrectAnswer,
+                DocumentName = g.Document?.FileName ?? "Ders Dokümanı"
+            }).ToList();
+
+            string topicFocusHeader = !string.IsNullOrWhiteSpace(targetTopic)
+                ? $"🎯 HEDEFLENEN TEK KONU: \"{targetTopic}\""
+                : $"🎯 ODAK KONU GRUPLARI: {string.Join(", ", gaps.Select(g => g.TopicName).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct())}";
+
+            string strictTopicRule = !string.IsNullOrWhiteSpace(targetTopic)
+                ? $@"
+🚨 KESİNLİKLE ZORUNLU KURAL:
+Üretilecek İSTİSNASIZ TÜM {questionCount} ADET SORUNUN TAMAMI SADECE VE SADECE ""{targetTopic}"" KONUSU İLE İLGİLİ OLMALIDIR!
+- Başka hiçbir konu başlığından veya dersin diğer bölümlerinden soru SORMA.
+- Soruların tamamı ""{targetTopic}"" kavramlarını, teorisini, çalışma prensibini ve kullanım senaryolarını yoklamalıdır.
+- Üretilen her soru objesinin ""topic"" alanına istisnasız ""{targetTopic}"" yazılmalıdır.
+"
+                : @"
+- Sorular öğrencinin aşağıda listelenen tüm eksik konularından dengeli karma şekilde hazırlanmalıdır.
+";
+
+            var wrongDetailsStr = string.Join("\n", gapItems.Take(15).Select((g, idx) =>
+                $"{idx + 1}. [Konu: {g.Topic}] Soru: \"{g.Question}\" -> Öğrenci Yanlış Seçimi: \"{g.UserWrongChoice}\", Doğru Yanıt: \"{g.CorrectAnswer}\" (Kaynak: {g.DocumentName})"
+            ));
+
+            var docIds = gaps.Select(g => g.CourseDocumentId).Where(id => id > 0).Distinct().ToList();
+            var documentTexts = new List<string>();
+            foreach (var docId in docIds)
+            {
+                try
+                {
+                    var chunks = await _courseDocumentService.GetDocumentTextChunksAsync(docId);
+                    if (chunks != null && chunks.Count > 0)
+                    {
+                        if (!string.IsNullOrWhiteSpace(targetTopic))
+                        {
+                            var matchedChunks = chunks.Where(c => c.Contains(targetTopic, StringComparison.OrdinalIgnoreCase) ||
+                                targetTopic.Split(' ').Any(w => w.Length > 3 && c.Contains(w, StringComparison.OrdinalIgnoreCase))).ToList();
+                            if (matchedChunks.Count > 0)
+                            {
+                                documentTexts.Add(string.Join("\n", matchedChunks.Take(5)));
+                            }
+                            else
+                            {
+                                documentTexts.Add(string.Join("\n", chunks.Take(5)));
+                            }
+                        }
+                        else
+                        {
+                            documentTexts.Add(string.Join("\n", chunks.Take(5)));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GapQuiz Chunk Error]: {ex.Message}");
+                }
+            }
+
+            string contextText = documentTexts.Count > 0 ? string.Join("\n\n---\n\n", documentTexts) : "";
+            if (contextText.Length > 8000)
+            {
+                contextText = contextText.Substring(0, 8000);
+            }
+
+            string jsonPrompt = $@"
+Aşağıda bir öğrencinin geçmiş sınavlarda YANLIŞ CEVAPLADIĞI SORULAR VE ZAYIF OLDUĞU KONU BAŞLIKLARI verilmiştir:
+
+{topicFocusHeader}
+
+❌ ÖĞRENCİNİN GEÇMİŞTE YANLIŞ YAPTIĞI DETAYLI SORULAR & DOĞRU CEVAPLARI:
+{wrongDetailsStr}
+
+{(string.IsNullOrWhiteSpace(contextText) ? "" : $"📄 DERS DOKÜMANLARINDAN İLGİLİ BAĞLAM METİNLERİ:\n{contextText}\n")}
+
+GÖREV:
+Yukarıda verilen bilgilere dayanarak öğrencinin eksiklerini kapatması için {questionCount} adet çoktan seçmeli Türkçe quiz sorusu üret.
+
+{strictTopicRule}
+
+Eğitimsel İlkeler:
+1. Sorular tamamen öğrencinin HATA YAPTIĞI KONULAR VE BİLGİ EKSİKLERİ etrafında kurgulanmalıdır.
+2. Her sorunun açıklaması ('explanation'), öğrencinin geçmişte yaptığı hatayı neden yapmaması gerektiğini ve doğru mantığı net bir şekilde kavramasını sağlamalıdır.
+3. Bloom Taksonomisine uygun olarak kavratıcı ve öğretici olmalıdır.
+
+Sadece geçerli JSON döndür. Markdown, açıklama veya kod bloğu kullanma.
+JSON formatı:
+[
+  {{
+    ""question"": ""Soru metni"",
+    ""options"": [""A seçeneği"", ""B seçeneği"", ""C seçeneği"", ""D seçeneği""],
+    ""correctIndex"": 0,
+    ""explanation"": ""Doğru cevabı açıklayan ve kavram eksikliğini gideren detaylı gerekçe"",
+    ""topic"": ""{(!string.IsNullOrWhiteSpace(targetTopic) ? targetTopic : "İlgili Konu Başlığı")}"",
+    ""difficulty"": ""Easy|Medium|Hard"",
+    ""bloomLevel"": ""Hatırlama|Kavrama|Uygulama|Analiz|Değerlendirme|Sentez"",
+    ""sourceHint"": ""Kaynak İpucu"",
+    ""whyWrong"": [""A neden yanlış"", ""B neden yanlış"", ""C neden yanlış"", ""D neden yanlış""]
+  }}
+]
+";
+
+            try
+            {
+                var json = await _aiService.SummarizeTextAsync(jsonPrompt);
+                var questions = TryParseQuizJson(json, questionCount);
+                if (questions != null && questions.Count > 0)
+                {
+                    if (!string.IsNullOrWhiteSpace(targetTopic))
+                    {
+                        foreach (var q in questions)
+                        {
+                            q.Topic = targetTopic;
+                        }
+                    }
+                    return questions;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[GapQuiz AI Error]: {ex.Message}");
+            }
+
+            var fallbackQuestions = BuildFallbackGapQuiz(gapItems, questionCount);
+            if (!string.IsNullOrWhiteSpace(targetTopic))
+            {
+                foreach (var q in fallbackQuestions)
+                {
+                    q.Topic = targetTopic;
+                }
+            }
+            return fallbackQuestions;
+        }
+
+        private static List<QuizQuestionDto> BuildFallbackGapQuiz(IEnumerable<dynamic> gapItems, int questionCount)
+        {
+            var list = new List<QuizQuestionDto>();
+            foreach (var gap in gapItems)
+            {
+                string questionText = gap.Question;
+                string correctAnswer = gap.CorrectAnswer;
+                string wrongAnswer = gap.UserWrongChoice;
+                string topic = gap.Topic;
+
+                if (string.IsNullOrWhiteSpace(questionText) || string.IsNullOrWhiteSpace(correctAnswer))
+                    continue;
+
+                var options = new List<string> { correctAnswer };
+                if (!string.IsNullOrWhiteSpace(wrongAnswer) && wrongAnswer != correctAnswer)
+                {
+                    options.Add(wrongAnswer);
+                }
+                else
+                {
+                    options.Add("Açıklama ile çelişen alternatif seçenek");
+                }
+
+                options.Add("Diğer tüm seçenekler doğru");
+                options.Add("Hiçbiri");
+
+                var rnd = new Random(questionText.GetHashCode());
+                var shuffledOptions = options.OrderBy(x => rnd.Next()).ToList();
+                int correctIndex = shuffledOptions.IndexOf(correctAnswer);
+
+                list.Add(new QuizQuestionDto
+                {
+                    Question = questionText,
+                    Options = shuffledOptions,
+                    CorrectIndex = correctIndex >= 0 ? correctIndex : 0,
+                    Explanation = $"Bu soru daha önce yanlış cevaplanmıştır. Doğru cevap: '{correctAnswer}'.",
+                    Topic = topic ?? "Eksik Konu",
+                    Difficulty = "Medium",
+                    BloomLevel = "Kavrama",
+                    SourceHint = "Öğrenci Yanlış Cevap Kaydı",
+                    WhyWrong = new List<string> { "Hatalı seçenek", "Hatalı seçenek", "Hatalı seçenek", "Hatalı seçenek" }
+                });
+
+                if (list.Count >= questionCount) break;
+            }
+            return list;
+        }
+
         private string GetSemanticTopicCluster(string? rawTopic)
         {
             if (string.IsNullOrWhiteSpace(rawTopic)) return "Genel Ders Konuları";

@@ -58,7 +58,7 @@
                     </div>
                     <div>
                         <h2 class="fw-bold mb-1 text-white">Ders ve Konu Grubu Bazlı Eksiklerim</h2>
-                        <p class="text-white-50 mb-0 small">Yanlış yaptığınız sorular <strong>konularına göre gruplanmıştır</strong>. Öğrendiğiniz konuları <em>'Öğrendim (Konuyu Sil)'</em> butonuyla temizleyebilirsiniz.</p>
+                        <p class="text-white-50 mb-0 small">Yanlış yaptığınız sorular <strong>konularına göre gruplanmıştır</strong>. Konu bazlı veya ders bazlı karışık eksik testleri oluşturabilirsiniz.</p>
                     </div>
                 </div>
                 <div>
@@ -175,15 +175,17 @@
 
                                             <div class="card border border-primary-subtle shadow-sm rounded-3 bg-white overflow-hidden flex-shrink-0" id="topic-card-@topicCounter">
                                                 <!-- SEMANTİK KONU GRUBU BAŞLIĞI (TIKLANABİLİR AKORDİYON & SİLME BUTONU) -->
-                                                <div class="card-header py-2.5 px-3 bg-primary bg-opacity-10 border-bottom border-primary-subtle d-flex justify-content-between align-items-center"
-                                                     style="cursor: pointer;"
-                                                     data-bs-toggle="collapse"
-                                                     data-bs-target="#topic-collapse-@topicCounter">
-                                                    <div class="d-flex align-items-center gap-2">
+                                                <div class="card-header py-2.5 px-3 bg-primary bg-opacity-10 border-bottom border-primary-subtle d-flex justify-content-between align-items-center">
+                                                    <div class="d-flex align-items-center gap-2 flex-grow-1" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#topic-collapse-@topicCounter">
                                                         <i class="bi bi-folder-fill text-primary fs-6"></i>
                                                         <strong class="text-primary-emphasis fs-6">@topicClusterName</strong>
                                                     </div>
-                                                    <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <button type="button" class="btn btn-sm btn-primary text-white fw-bold border-0 py-1 px-2.5 rounded-pill shadow-sm"
+                                                                title="Sadece bu konudaki eksiklerinizden özel test üretir"
+                                                                onclick="startGapQuiz(event, @courseId, '@topicClusterName')">
+                                                            <i class="bi bi-bullseye me-1"></i> Bu Konudan Quiz Çöz
+                                                        </button>
                                                         <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 small">
                                                             <span id="topic-question-num-@topicCounter">@topicGroup.Count()</span> Soru / <span id="topic-error-num-@topicCounter">@wrongCountInTopic</span> Hata
                                                         </span>
@@ -287,12 +289,18 @@
                                                 }
                                             </div>
 
-                                            <div class="p-3 rounded-3 border border-primary-subtle bg-primary-subtle text-primary small">
+                                            <div class="p-3 rounded-3 border border-primary-subtle bg-primary-subtle text-primary small mb-3">
                                                 <div class="fw-bold mb-1"><i class="bi bi-lightbulb-fill me-1 text-warning"></i> Tavsiye Olunan Adım:</div>
                                                 <p class="mb-0 text-secondary" style="font-size: 0.82rem; line-height: 1.5;">
-                                                    Bu derste en çok hata yaptığınız <strong>@courseTopTopics.FirstOrDefault()?.Topic</strong> kümesindeki konuları kapatmak için ders sayfasına gidip sesli özeti dinleyebilirsiniz.
+                                                    Bu derste en çok hata yaptığınız <strong>@courseTopTopics.FirstOrDefault()?.Topic</strong> kümesindeki konuları kapatmak için derse özel karışık quiz çözebilir veya sesli özeti dinleyebilirsiniz.
                                                 </p>
                                             </div>
+
+                                            <button type="button" class="btn btn-warning text-dark fw-bold w-100 rounded-pill py-2 shadow-sm"
+                                                    title="Bu dersteki tüm eksik konulardan karışık test oluşturur"
+                                                    onclick="startGapQuiz(event, @courseId, '')">
+                                                <i class="bi bi-shuffle me-1"></i> @courseCode Karışık Quiz Çöz
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -303,6 +311,48 @@
             }
         </div>
     }
+</div>
+
+<!-- 🎯 EKSİK KONULAR İÇİN ETKİLEŞİMLİ QUIZ MODALI -->
+<div class="modal fade" id="gapQuizModal" tabindex="-1" aria-labelledby="gapQuizModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow-lg border-0 rounded-4">
+            <div class="modal-header bg-primary text-white py-3">
+                <div>
+                    <h5 class="modal-title fw-bold text-white mb-0" id="gapQuizModalLabel"><i class="bi bi-puzzle-fill me-2"></i> Eksik Konu Pekiştirme Quizi</h5>
+                    <small class="text-white-50" id="gapQuizProgressText">Yapay zeka soruları hazırlıyor...</small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="progress quiz-progress mb-3" role="progressbar" aria-label="Quiz ilerleme" style="height: 8px;">
+                    <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" id="gapQuizProgressBar" style="width: 0%"></div>
+                </div>
+
+                <div id="gapQuizLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+                    <p class="text-dark fw-bold mt-3 mb-1">Eksik Konularınız İnceleyerek Sorular Hazırlanıyor...</p>
+                    <small class="text-muted">Yanlış yaptığınız kavramları tam olarak kavratacak sorular üretiliyor.</small>
+                </div>
+
+                <div id="gapQuizQuestionArea" class="d-none">
+                    <div class="quiz-meta mb-3" id="gapQuizMeta"></div>
+                    <h5 class="quiz-question fw-bold text-dark mb-3" id="gapQuizQuestionText"></h5>
+                    <div id="gapQuizOptions" class="quiz-options d-flex flex-column gap-2 mb-3"></div>
+                </div>
+
+                <div id="gapQuizResultArea" class="d-none text-center py-4">
+                    <div class="quiz-score fs-2 fw-bold text-primary mb-1" id="gapQuizScoreText"></div>
+                    <p class="text-muted mb-4" id="gapQuizScoreDetail"></p>
+                    <div id="gapQuizReview" class="text-start"></div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-0 py-2 justify-content-between">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">Kapat</button>
+                <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold" id="gapQuizNextBtn" disabled>Sonraki Soru <i class="bi bi-arrow-right ms-1"></i></button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ONAY MODALI (MODAL CONFIRMATION DIALOG) -->
@@ -333,11 +383,31 @@
 
 @section Scripts {
     <script>
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         let currentCourseId = 0;
         let currentTopicName = '';
         let currentElementId = '';
         let currentTopicCounter = 0;
         let currentTopicQuestionCount = 0;
+
+        let gapQuizState = {
+            questions: [],
+            currentIndex: 0,
+            answers: [],
+            selectedIndex: null,
+            courseId: 0,
+            documentId: 0,
+            topicName: ''
+        };
 
         function decrementNum(id, amount = 1) {
             let el = document.getElementById(id);
@@ -382,7 +452,6 @@
                 if (result.success) {
                     let deletedAmount = result.deletedCount || currentTopicQuestionCount || 1;
 
-                    // Dinamik Sayı Güncellemeleri (Anında Düşüş)
                     decrementNum('totalErrorNum', deletedAmount);
                     decrementNum(`course-error-num-${currentCourseId}`, deletedAmount);
                     decrementNum(`course-total-questions-num-${currentCourseId}`, deletedAmount);
@@ -415,7 +484,6 @@
 
                 let result = await response.json();
                 if (result.success) {
-                    // Dinamik Sayı Güncellemeleri (Sayfa Yenilemeden Anında 1 Düşer)
                     decrementNum('totalErrorNum', 1);
                     decrementNum(`course-error-num-${courseId}`, 1);
                     decrementNum(`course-total-questions-num-${courseId}`, 1);
@@ -432,6 +500,191 @@
             } catch (err) {
                 console.error(err);
             }
+        }
+
+        // 🎯 EKSİK KONULARDAN QUIZ ÜRET & BAŞLAT HANDLER
+        function startGapQuiz(event, courseId, topicName) {
+            if (event) {
+                if (event.preventDefault) event.preventDefault();
+                if (event.stopPropagation) event.stopPropagation();
+            }
+
+            courseId = parseInt(courseId) || 0;
+            topicName = topicName || "";
+
+            gapQuizState = {
+                questions: [],
+                currentIndex: 0,
+                answers: [],
+                selectedIndex: null,
+                courseId: courseId,
+                documentId: 0,
+                topicName: topicName
+            };
+
+            $("#gapQuizModalLabel").text("Eksik Konu Quizi Hazırlanıyor...");
+            $("#gapQuizProgressText").text("Yapay zeka soruları hazırlıyor...");
+            $("#gapQuizProgressBar").css("width", "0%");
+            $("#gapQuizLoading").removeClass("d-none");
+            $("#gapQuizQuestionArea").addClass("d-none");
+            $("#gapQuizResultArea").addClass("d-none");
+            $("#gapQuizNextBtn").prop("disabled", true).text("Sonraki Soru").removeClass("btn-success").addClass("btn-primary");
+
+            let gapModalEl = document.getElementById('gapQuizModal');
+            let gapModal = new bootstrap.Modal(gapModalEl);
+            gapModal.show();
+
+            $.ajax({
+                url: '/Course/GenerateGapQuiz',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    courseId: courseId > 0 ? courseId : null,
+                    topicName: topicName,
+                    questionCount: 5,
+                    difficulty: 'mixed'
+                }),
+                success: function (res) {
+                    if (res.success && res.questions && res.questions.length > 0) {
+                        gapQuizState.questions = res.questions;
+                        gapQuizState.answers = new Array(res.questions.length).fill(null);
+                        gapQuizState.currentIndex = 0;
+                        gapQuizState.courseId = res.courseId || courseId;
+                        gapQuizState.documentId = res.documentId || 0;
+
+                        $("#gapQuizModalLabel").html(escapeHtml(res.title || "Eksik Konu Quizi"));
+                        renderGapQuizQuestion();
+                    } else {
+                        $("#gapQuizLoading").addClass("d-none");
+                        $("#gapQuizResultArea").removeClass("d-none");
+                        $("#gapQuizScoreText").text("Quiz Hazırlanamadı");
+                        $("#gapQuizScoreDetail").text(res.response || "Eksik konulara ait soru oluşturulamadı.");
+                    }
+                },
+                error: function () {
+                    $("#gapQuizLoading").addClass("d-none");
+                    $("#gapQuizResultArea").removeClass("d-none");
+                    $("#gapQuizScoreText").text("Hata Oluştu");
+                    $("#gapQuizScoreDetail").text("Sunucu ile iletişim kurulurken bir sorun meydana geldi.");
+                }
+            });
+        }
+
+        function renderGapQuizQuestion() {
+            let q = gapQuizState.questions[gapQuizState.currentIndex];
+            gapQuizState.selectedIndex = gapQuizState.answers[gapQuizState.currentIndex];
+            let progress = ((gapQuizState.currentIndex + 1) / gapQuizState.questions.length) * 100;
+
+            $("#gapQuizLoading").addClass("d-none");
+            $("#gapQuizResultArea").addClass("d-none");
+            $("#gapQuizQuestionArea").removeClass("d-none");
+            $("#gapQuizProgressText").text("Soru " + (gapQuizState.currentIndex + 1) + " / " + gapQuizState.questions.length);
+            $("#gapQuizProgressBar").css("width", progress + "%");
+
+            $("#gapQuizMeta").html(
+                "<div class='d-flex align-items-center gap-2 flex-wrap'>" +
+                "<span class='badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25'>" + escapeHtml(q.difficulty || "Orta") + "</span>" +
+                "<span class='badge bg-info bg-opacity-10 text-info border border-info border-opacity-25'>" + escapeHtml(q.bloomLevel || "Kavrama") + "</span>" +
+                "<span class='badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25'><i class='bi bi-tag-fill me-1'></i> " + escapeHtml(q.topic || "Eksik Konu") + "</span>" +
+                "</div>"
+            );
+            $("#gapQuizQuestionText").text(q.question);
+            $("#gapQuizNextBtn")
+                .prop("disabled", gapQuizState.selectedIndex === null)
+                .text(gapQuizState.currentIndex === gapQuizState.questions.length - 1 ? "Testi Bitir" : "Sonraki Soru")
+                .removeClass("btn-success")
+                .addClass("btn-primary");
+
+            let optsHtml = "";
+            q.options.forEach(function (opt, idx) {
+                let selClass = gapQuizState.selectedIndex === idx ? " selected" : "";
+                optsHtml += "<button type='button' class='quiz-option gap-quiz-option" + selClass + "' data-index='" + idx + "'><span>" + String.fromCharCode(65 + idx) + "</span><strong>" + escapeHtml(opt) + "</strong></button>";
+            });
+            $("#gapQuizOptions").html(optsHtml);
+        }
+
+        $(document).on("click", ".gap-quiz-option", function () {
+            gapQuizState.selectedIndex = parseInt($(this).data("index"));
+            $(".gap-quiz-option").removeClass("selected");
+            $(this).addClass("selected");
+            $("#gapQuizNextBtn").prop("disabled", false);
+        });
+
+        $("#gapQuizNextBtn").click(function () {
+            if (gapQuizState.selectedIndex === null) return;
+            gapQuizState.answers[gapQuizState.currentIndex] = gapQuizState.selectedIndex;
+
+            if (gapQuizState.currentIndex >= gapQuizState.questions.length - 1) {
+                renderGapQuizResult();
+                return;
+            }
+            gapQuizState.currentIndex++;
+            renderGapQuizQuestion();
+        });
+
+        function renderGapQuizResult() {
+            let score = 0;
+            let reviewHtml = "";
+
+            gapQuizState.questions.forEach(function (question, index) {
+                let userAnswer = gapQuizState.answers[index];
+                let isCorrect = userAnswer === question.correctIndex;
+                if (isCorrect) {
+                    score++;
+                } else {
+                    let selectedOptText = (userAnswer !== null && question.options && question.options[userAnswer]) ? question.options[userAnswer] : "Yanıtlanmadı";
+                    let correctOptText = (question.options && question.options[question.correctIndex]) ? question.options[question.correctIndex] : "";
+
+                    $.ajax({
+                        url: '/Course/RecordWrongAnswer',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            courseId: parseInt(gapQuizState.courseId) || 0,
+                            courseDocumentId: parseInt(gapQuizState.documentId) || 0,
+                            questionText: question.question,
+                            selectedAnswer: selectedOptText,
+                            correctAnswer: correctOptText,
+                            topicName: question.topic || gapQuizState.topicName || "Eksik Konular"
+                        })
+                    });
+                }
+
+                reviewHtml += "<div class='quiz-review-item " + (isCorrect ? "correct" : "incorrect") + " position-relative shadow-sm mb-3 p-3 rounded-3 border " + (isCorrect ? "border-success bg-success bg-opacity-10" : "border-danger bg-danger bg-opacity-10") + "'>";
+                reviewHtml += "<h6 class='fw-bold mb-2 text-dark'>" + (index + 1) + ". " + escapeHtml(question.question) + "</h6>";
+                reviewHtml += "<div class='quiz-review-meta mb-2 small d-flex gap-2'>" +
+                    "<span class='badge bg-secondary'>" + escapeHtml(question.topic || "Eksik Konu") + "</span>" +
+                    "<span class='badge bg-info'>" + escapeHtml(question.bloomLevel || "Kavrama") + "</span>" +
+                    "</div>";
+
+                reviewHtml += "<div class='my-2 d-flex flex-column gap-1'>";
+                question.options.forEach(function (optText, optIdx) {
+                    let letter = String.fromCharCode(65 + optIdx);
+                    if (optIdx === question.correctIndex) {
+                        reviewHtml += "<div class='p-2 rounded bg-success text-white fw-bold d-flex justify-content-between'>" +
+                            "<span>" + letter + ") " + escapeHtml(optText) + "</span> <span class='badge bg-white text-success'>Doğru Cevap</span></div>";
+                    } else if (optIdx === userAnswer && !isCorrect) {
+                        reviewHtml += "<div class='p-2 rounded bg-danger text-white fw-bold d-flex justify-content-between'>" +
+                            "<span>" + letter + ") " + escapeHtml(optText) + "</span> <span class='badge bg-white text-danger'>Senin Seçimin</span></div>";
+                    } else {
+                        reviewHtml += "<div class='p-2 rounded bg-white text-secondary border'>" +
+                            "<span>" + letter + ") " + escapeHtml(optText) + "</span></div>";
+                    }
+                });
+                reviewHtml += "</div>";
+
+                if (question.explanation) {
+                    reviewHtml += "<div class='mt-2 p-2 rounded bg-white border small'><strong class='text-primary d-block'><i class='bi bi-lightbulb me-1'></i> AÇIKLAMA:</strong> " + escapeHtml(question.explanation) + "</div>";
+                }
+                reviewHtml += "</div>";
+            });
+
+            $("#gapQuizQuestionArea").addClass("d-none");
+            $("#gapQuizResultArea").removeClass("d-none");
+            $("#gapQuizScoreText").text("Skorunuz: " + score + " / " + gapQuizState.questions.length);
+            $("#gapQuizScoreDetail").text("Eksik konu testini tamamladınız. Yanıtlarınızı aşağıdan kontrol edebilirsiniz.");
+            $("#gapQuizReview").html(reviewHtml);
+            $("#gapQuizNextBtn").prop("disabled", true).text("Test Tamamlandı").removeClass("btn-primary").addClass("btn-success");
         }
     </script>
 }
