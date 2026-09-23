@@ -73,22 +73,83 @@
                             var currentWeek = w;
                             var weekDocs = Model.Documents != null ? Model.Documents.Where(d => d.WeekNumber == currentWeek).ToList() : new List<MiniLms.Models.CourseDocument>();
                             var weekLessons = Model.Lessons != null ? Model.Lessons.Where(l => l.WeekNumber == currentWeek).ToList() : new List<MiniLms.Models.Lesson>();
-                            var hasContent = weekDocs.Any() || weekLessons.Any(l => l.Contents != null && l.Contents.Any());
+                            var weekVideos = weekLessons.SelectMany(l => l.Contents ?? new List<MiniLms.Models.LessonContent>()).Where(c => c.Type == "Video" || c.Type == "MediaCmsVideo").ToList();
+                            var hasContent = weekDocs.Any() || weekVideos.Any() || weekLessons.Any(l => l.Contents != null && l.Contents.Any(c => c.Type != "Video" && c.Type != "MediaCmsVideo"));
 
                             <div class="accordion-item mb-2 border rounded overflow-hidden">
                                 <h2 class="accordion-header" id="heading-week-@currentWeek">
                                     <button class="accordion-button @(currentWeek == 1 || hasContent ? "" : "collapsed") fw-bold py-3" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-week-@currentWeek">
                                         <div class="d-flex align-items-center justify-content-between w-100 me-2">
                                             <span><i class="bi bi-calendar-event text-primary me-2"></i> @currentWeek. Hafta İçerikleri</span>
-                                            @if (weekDocs.Any())
-                                            {
-                                                <span class="badge bg-primary rounded-pill small ms-2">@weekDocs.Count Doküman</span>
-                                            }
+                                            <div class="d-flex align-items-center gap-1">
+                                                @if (weekVideos.Any())
+                                                {
+                                                    <span class="badge bg-danger rounded-pill small"><i class="bi bi-play-circle-fill me-1"></i>@weekVideos.Count Video</span>
+                                                }
+                                                @if (weekDocs.Any())
+                                                {
+                                                    <span class="badge bg-primary rounded-pill small ms-1">@weekDocs.Count Doküman</span>
+                                                }
+                                            </div>
                                         </div>
                                     </button>
                                 </h2>
                                 <div id="collapse-week-@currentWeek" class="accordion-collapse collapse @(currentWeek == 1 || hasContent ? "show" : "")" data-bs-parent="#lessonsAccordion">
                                     <div class="accordion-body bg-light p-3">
+                                        @if (User.IsInRole("Teacher"))
+                                        {
+                                            <div class="d-flex justify-content-end mb-3">
+                                                <button type="button" class="btn btn-sm btn-outline-danger fw-semibold shadow-xs btn-open-mediacms-modal" data-week="@currentWeek" data-bs-toggle="modal" data-bs-target="#mediaCmsVideoModal">
+                                                    <i class="bi bi-film me-1"></i> MediaCMS Video Ekle
+                                                </button>
+                                            </div>
+                                        }
+
+                                        @if (weekVideos.Any())
+                                        {
+                                            <div class="mb-3">
+                                                <h6 class="fw-bold text-danger mb-2" style="font-size: 0.85rem;">
+                                                    <i class="bi bi-broadcast me-1"></i> @currentWeek. Hafta Ders Videoları (MediaCMS / HLS Akışı):
+                                                </h6>
+                                                @foreach (var vid in weekVideos)
+                                                {
+                                                    var token = !string.IsNullOrEmpty(vid.ResourceUrl) 
+                                                        ? vid.ResourceUrl 
+                                                        : vid.Body?.Replace("http://localhost/embed?m=", "").Replace("http://localhost/embed/", "").Trim();
+                                                    <div class="card mb-3 border border-danger-subtle shadow-sm bg-white rounded-3 overflow-hidden">
+                                                        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <span class="badge bg-danger"><i class="bi bi-play-fill"></i> HLS 4K/Adaptive</span>
+                                                                <strong class="small text-truncate" style="max-width: 320px;" title="@vid.Title">@vid.Title</strong>
+                                                            </div>
+                                                            @if (User.IsInRole("Teacher"))
+                                                            {
+                                                                <form asp-action="DeleteMediaCmsVideo" method="post" class="d-inline" onsubmit="return confirm('Bu videoyu bu haftadan kaldırmak istediğinize emin misiniz?');">
+                                                                    @Html.AntiForgeryToken()
+                                                                    <input type="hidden" name="contentId" value="@vid.Id" />
+                                                                    <input type="hidden" name="courseId" value="@Model.Id" />
+                                                                    <button type="submit" class="btn btn-xs btn-outline-light btn-sm py-0 px-2" title="Videoyu Kaldır">
+                                                                        <i class="bi bi-trash"></i> Sil
+                                                                    </button>
+                                                                </form>
+                                                            }
+                                                        </div>
+                                                        <div class="ratio ratio-16x9 bg-black">
+                                                            <iframe src="http://localhost/embed?m=@token" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+                                                        </div>
+                                                        <div class="card-footer bg-light py-2 d-flex justify-content-between align-items-center">
+                                                            <small class="text-muted" style="font-size: 11px;">
+                                                                <i class="bi bi-hdd-network text-success me-1"></i> MinIO S3 Deposu & Celery Worker
+                                                            </small>
+                                                            <a href="http://localhost/view?m=@token" target="_blank" class="btn btn-xs btn-outline-primary btn-sm py-0 px-2" style="font-size: 11px;">
+                                                                <i class="bi bi-box-arrow-up-right me-1"></i> MediaCMS Sayfası
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+
                                         @if (weekDocs.Any())
                                         {
                                             <div class="mb-3">
@@ -152,26 +213,27 @@
                                         {
                                             @foreach (var lesson in weekLessons.Where(l => !l.Title.StartsWith("Doküman Konuları") && l.Title != "Yüklenen Dokümanlar"))
                                             {
-                                                <div class="card mb-2 border-0 bg-white shadow-sm p-3">
-                                                    <h6 class="fw-bold text-dark mb-2">@lesson.Title</h6>
-                                                    @if (lesson.Contents != null && lesson.Contents.Any())
-                                                    {
-                                                        foreach (var content in lesson.Contents.OrderBy(c => c.Order))
+                                                var regularContents = lesson.Contents?.Where(c => c.Type != "Video" && c.Type != "MediaCmsVideo").OrderBy(c => c.Order).ToList();
+                                                if (regularContents != null && regularContents.Any())
+                                                {
+                                                    <div class="card mb-2 border-0 bg-white shadow-sm p-3">
+                                                        <h6 class="fw-bold text-dark mb-2">@lesson.Title</h6>
+                                                        @foreach (var content in regularContents)
                                                         {
                                                             <div class="mb-2 ms-2">
                                                                 <strong class="small text-dark d-block">@content.Title</strong>
                                                                 <p class="small text-muted mb-0">@content.Text</p>
                                                             </div>
                                                         }
-                                                    }
-                                                </div>
+                                                    </div>
+                                                }
                                             }
                                         }
 
                                         @if (!hasContent)
                                         {
                                             <div class="text-center py-3 text-muted">
-                                                <small><i class="bi bi-info-circle me-1"></i> Bu haftaya ait henüz doküman yüklenmemiştir.</small>
+                                                <small><i class="bi bi-info-circle me-1"></i> Bu haftaya ait henüz doküman veya video yüklenmemiştir.</small>
                                             </div>
                                         }
                                     </div>
@@ -722,12 +784,214 @@
     </div>
 </div>
 
+<!-- MediaCMS Video Ekle / Seç Modalı -->
+<div class="modal fade" id="mediaCmsVideoModal" tabindex="-1" aria-labelledby="mediaCmsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-danger text-white py-3">
+                <div>
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2 mb-1" id="mediaCmsModalLabel">
+                        <i class="bi bi-film"></i> MediaCMS Video Yöneticisi (<span id="modalWeekDisplay">1</span>. Hafta)
+                    </h5>
+                    <small class="text-white-50" style="font-size: 11px;">
+                        <i class="bi bi-folder2-open me-1"></i> <span id="modalPlaylistTitleText">Ders Oynatma Listesi</span>
+                    </small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body p-4">
+                <ul class="nav nav-pills nav-fill mb-3" id="mediaCmsTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active fw-bold" id="tab-library-tab" data-bs-toggle="tab" data-bs-target="#tab-library" type="button" role="tab">
+                            <i class="bi bi-collection-play me-1"></i> Oynatma Listesinden Seç
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link fw-bold" id="tab-upload-tab" data-bs-toggle="tab" data-bs-target="#tab-upload" type="button" role="tab">
+                            <i class="bi bi-cloud-arrow-up me-1"></i> Yeni Video Yükle (HLS + S3)
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content pt-2" id="mediaCmsTabContent">
+                    <!-- Sekme 1: Kütüphaneden Seç -->
+                    <div class="tab-pane fade show active" id="tab-library" role="tabpanel">
+                        <!-- Filtreleme Butonları -->
+                        <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded-3 border">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-danger active" id="btnFilterCoursePlaylist">
+                                    <i class="bi bi-person-check me-1"></i> Bu Dersin Playlist Videoları
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="btnFilterAllLibrary">
+                                    <i class="bi bi-globe me-1"></i> Tüm MediaCMS Kütüphanesi
+                                </button>
+                            </div>
+                            <span class="badge bg-secondary" id="videoCountBadge">0 Video</span>
+                        </div>
+
+                        <div id="mediaCmsLoading" class="text-center py-4">
+                            <div class="spinner-border text-danger" role="status">
+                                <span class="visually-hidden">Yükleniyor...</span>
+                            </div>
+                            <p class="text-muted small mt-2">MediaCMS oynatma listesindeki videolar getiriliyor...</p>
+                        </div>
+                        <div id="mediaCmsVideoList" class="row g-3 d-none" style="max-height: 420px; overflow-y: auto;">
+                            <!-- AJAX ile dinamik dolar -->
+                        </div>
+                        <div id="mediaCmsEmpty" class="text-center py-4 d-none">
+                            <i class="bi bi-camera-video-off text-muted fs-1 mb-2 d-block"></i>
+                            <p class="text-muted small mb-0" id="mediaCmsEmptyText">Bu dersin MediaCMS oynatma listesinde henüz kayıtlı video bulunamadı. "Yeni Video Yükle" sekmesinden ilk videonuzu ekleyebilirsiniz.</p>
+                        </div>
+                    </div>
+
+                    <!-- Sekme 2: Yeni Video Yükle -->
+                    <div class="tab-pane fade" id="tab-upload" role="tabpanel">
+                        <form asp-action="UploadMediaCmsVideo" method="post" enctype="multipart/form-data" id="formUploadMediaCmsVideo">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="courseId" value="@Model.Id" />
+                            <input type="hidden" name="weekNumber" id="uploadWeekNumber" value="1" />
+
+                            <div class="alert alert-info py-2 px-3 small mb-3">
+                                <i class="bi bi-info-circle-fill me-1"></i> Yüklenen video otomatik olarak MediaCMS'te bu derse özel oluşturulan oynatma listesine eklenecek ve HLS formatında MinIO S3 deposuna kaydedilecektir.
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold text-dark small">Video Dosyası (.mp4, .mov, .mkv - 500 MB limit):</label>
+                                <input type="file" name="videoFile" class="form-control" accept="video/*" required />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold text-dark small">Ders Video Başlığı (Opsiyonel):</label>
+                                <input type="text" name="title" class="form-control" placeholder="Örn: 1. Hafta - Giriş Dersi" />
+                            </div>
+
+                            <div class="d-grid mt-4">
+                                <button type="submit" class="btn btn-danger fw-bold py-2 shadow-sm" id="btnUploadSubmit">
+                                    <i class="bi bi-cloud-arrow-up-fill me-1"></i> MediaCMS'e Yükle ve Oynatma Listesine Ekle
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
     <script>
         $(document).ready(function () {
+        // 🎬 MediaCMS Video Modal ve Ders Playlist Yöneticisi
+        let selectedWeekForVideo = 1;
+        let showAllMediaCmsVideos = false;
+
+        $(document).on('click', '.btn-open-mediacms-modal', function() {
+            selectedWeekForVideo = $(this).data('week') || 1;
+            $('#modalWeekDisplay').text(selectedWeekForVideo);
+            $('#uploadWeekNumber').val(selectedWeekForVideo);
+            showAllMediaCmsVideos = false;
+            updateFilterButtons();
+            loadMediaCmsLibrary();
+        });
+
+        $('#btnFilterCoursePlaylist').on('click', function() {
+            showAllMediaCmsVideos = false;
+            updateFilterButtons();
+            loadMediaCmsLibrary();
+        });
+
+        $('#btnFilterAllLibrary').on('click', function() {
+            showAllMediaCmsVideos = true;
+            updateFilterButtons();
+            loadMediaCmsLibrary();
+        });
+
+        function updateFilterButtons() {
+            if (showAllMediaCmsVideos) {
+                $('#btnFilterAllLibrary').removeClass('btn-outline-secondary').addClass('btn-danger active');
+                $('#btnFilterCoursePlaylist').removeClass('btn-danger active').addClass('btn-outline-secondary');
+            } else {
+                $('#btnFilterCoursePlaylist').removeClass('btn-outline-secondary').addClass('btn-danger active');
+                $('#btnFilterAllLibrary').removeClass('btn-danger active').addClass('btn-outline-secondary');
+            }
+        }
+
+        function loadMediaCmsLibrary() {
+            $('#mediaCmsLoading').removeClass('d-none');
+            $('#mediaCmsVideoList').addClass('d-none').empty();
+            $('#mediaCmsEmpty').addClass('d-none');
+
+            $.ajax({
+                url: '@Url.Action("GetMediaCmsVideos", "Course")',
+                type: 'GET',
+                data: { courseId: '@Model.Id', showAll: showAllMediaCmsVideos },
+                success: function(res) {
+                    $('#mediaCmsLoading').addClass('d-none');
+                    if (res.success && res.videos && res.videos.length > 0) {
+                        $('#mediaCmsVideoList').removeClass('d-none');
+                        $('#videoCountBadge').text(res.videos.length + ' Video');
+                        if (res.playlistTitle) {
+                            $('#modalPlaylistTitleText').text(res.playlistTitle);
+                        }
+
+                        res.videos.forEach(function(v) {
+                            const thumb = v.thumbnail_url || 'https://placehold.co/300x160/1e293b/white?text=MediaCMS+Video';
+                            const durationText = v.duration ? Math.round(v.duration) + ' sn' : '';
+                            const sizeText = v.size || '';
+                            const vTitle = v.title || 'Ders Videosu';
+                            const vToken = v.friendly_token || '';
+
+                            const card = `
+                                <div class="col-md-6 mb-2">
+                                    <div class="card h-100 border shadow-xs rounded-3 overflow-hidden bg-white">
+                                        <div class="position-relative bg-dark" style="height: 120px; overflow: hidden;">
+                                            <img src="${thumb}" class="w-100 h-100" style="object-fit: cover;" onerror="this.src='https://placehold.co/300x160/1e293b/white?text=MediaCMS+Video'" />
+                                            <span class="badge bg-dark bg-opacity-75 position-absolute bottom-0 end-0 m-1" style="font-size: 10px;">${durationText} ${sizeText}</span>
+                                        </div>
+                                        <div class="card-body p-2 d-flex flex-column justify-content-between">
+                                            <div>
+                                                <strong class="d-block text-dark small text-truncate" title="${escapeHtml(vTitle)}">${escapeHtml(vTitle)}</strong>
+                                                <small class="text-muted d-block mt-1" style="font-size: 11px;">Token: <code>${vToken}</code></small>
+                                            </div>
+                                            <form action="@Url.Action("AttachMediaCmsVideo", "Course")" method="post" class="mt-2">
+                                                <input type="hidden" name="__RequestVerificationToken" value="${$('input[name="__RequestVerificationToken"]').first().val()}" />
+                                                <input type="hidden" name="courseId" value="@Model.Id" />
+                                                <input type="hidden" name="weekNumber" value="${selectedWeekForVideo}" />
+                                                <input type="hidden" name="videoToken" value="${vToken}" />
+                                                <input type="hidden" name="title" value="${escapeHtml(vTitle)}" />
+                                                <button type="submit" class="btn btn-sm btn-danger w-100 py-1 fw-bold shadow-xs" style="font-size: 12px;">
+                                                    <i class="bi bi-plus-circle me-1"></i> Bu Haftaya Ekle
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            $('#mediaCmsVideoList').append(card);
+                        });
+                    } else {
+                        $('#videoCountBadge').text('0 Video');
+                        $('#mediaCmsEmpty').removeClass('d-none');
+                        if (!showAllMediaCmsVideos) {
+                            $('#mediaCmsEmptyText').text('Bu derse ait MediaCMS oynatma listesinde henüz kayıtlı video bulunmuyor. "Yeni Video Yükle" sekmesinden bu derse özel video yükleyebilir veya "Tüm MediaCMS Kütüphanesi"ne geçebilirsiniz.');
+                        } else {
+                            $('#mediaCmsEmptyText').text('MediaCMS sunucusunda henüz kayıtlı video bulunamadı.');
+                        }
+                    }
+                },
+                error: function() {
+                    $('#mediaCmsLoading').addClass('d-none');
+                    $('#mediaCmsEmpty').removeClass('d-none').find('#mediaCmsEmptyText').text('MediaCMS sunucusuna bağlanılamadı. Konteynerin çalıştığından emin olun.');
+                }
+            });
+        }
+
         var quizState = {
         questions: [],
         currentIndex: 0,

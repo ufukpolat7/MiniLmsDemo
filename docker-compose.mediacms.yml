@@ -1,0 +1,18 @@
+﻿version: '3.8'
+
+services:
+  mediacms:
+    image: mediacms/mediacms:latest
+    container_name: minilms_mediacms
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - FRONTEND_HOST=http://localhost
+    volumes:
+      - mediacms_media:/mediacms.io/media
+      - mediacms_db:/mediacms.io/db
+
+volumes:
+  mediacms_media:
+  mediacms_db:

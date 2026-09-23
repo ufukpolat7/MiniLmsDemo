@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniLms.Interfaces;
 using MiniLms.Models;
 using MiniLms.Models.Enums;
+using MiniLms.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using System;
@@ -22,6 +23,7 @@ namespace MiniLms.Controllers
         private readonly IVectorDbService _vectorDbService;
         private readonly ICourseDocumentService _courseDocumentService;
         private readonly IAzureSpeechService _azureSpeechService;
+        private readonly IMediaCmsService _mediaCmsService;
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _webHostEnvironment;
         private readonly MiniLms.Data.ApplicationDbContext _dbContext;
         private readonly Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> _userManager;
@@ -32,6 +34,7 @@ namespace MiniLms.Controllers
             IVectorDbService vectorDbService,
             ICourseDocumentService courseDocumentService,
             IAzureSpeechService azureSpeechService,
+            IMediaCmsService mediaCmsService,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment webHostEnvironment,
             MiniLms.Data.ApplicationDbContext dbContext,
             Microsoft.AspNetCore.Identity.UserManager<MiniLms.Models.ApplicationUser> userManager)
@@ -41,6 +44,7 @@ namespace MiniLms.Controllers
             _vectorDbService = vectorDbService;
             _courseDocumentService = courseDocumentService;
             _azureSpeechService = azureSpeechService;
+            _mediaCmsService = mediaCmsService;
             _webHostEnvironment = webHostEnvironment;
             _dbContext = dbContext;
             _userManager = userManager;
@@ -68,6 +72,17 @@ namespace MiniLms.Controllers
                 courses = await _courseService.GetAllCoursesAsync();
             }
 
+            // 🎯 Arka planda tüm mevcut dersler için MediaCMS Kategori & Playlist senkronizasyonu
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var all = await _courseService.GetAllCoursesAsync();
+                    await _mediaCmsService.SyncAllCoursesAsync(all);
+                }
+                catch { }
+            });
+
             return View(courses);
         }
 
@@ -94,7 +109,21 @@ namespace MiniLms.Controllers
                 }
 
                 await _courseService.AddCourseAsync(course);
-                TempData["SuccessMessage"] = $"'{course.Title}' dersi başarıyla oluşturuldu ve hesabınıza tanımlandı.";
+
+                // 🎯 Yeni eklenen ders için MediaCMS'te anında Kategori ve Oynatma Listesi oluştur
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var teacher = !string.IsNullOrEmpty(currentUserId) ? await _userManager.FindByIdAsync(currentUserId) : null;
+                        string teacherName = teacher != null ? $"{teacher.FirstName} {teacher.LastName}".Trim() : "Eğitmen";
+                        await _mediaCmsService.GetOrCreateCourseCategoryAsync(course.Id, course.Title, course.CourseCode, course.Description);
+                        await _mediaCmsService.GetOrCreateCoursePlaylistAsync(course.Id, course.Title, course.CourseCode, teacherName);
+                    }
+                    catch { }
+                });
+
+                TempData["SuccessMessage"] = $"'{course.Title}' dersi başarıyla oluşturuldu ve MediaCMS kategorisi açıldı.";
                 return RedirectToAction(nameof(Index));
             }
             return View(course);
@@ -299,6 +328,200 @@ namespace MiniLms.Controllers
             }
 
             // Silme işleminden sonra tekrar dersin detay sayfasına yönlendiriyoruz
+            return RedirectToAction("Details", new { id = courseId });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetMediaCmsVideos(int courseId, bool showAll = false)
+        {
+            try
+            {
+                var course = await _dbContext.Courses
+                    .Include(c => c.Teacher)
+                    .FirstOrDefaultAsync(c => c.Id == courseId);
+
+                if (course == null)
+                {
+                    return Json(new { success = false, message = "Ders bulunamadı." });
+                }
+
+                string teacherName = course.Teacher != null ? $"{course.Teacher.FirstName} {course.Teacher.LastName}".Trim() : "Eğitmen";
+
+                if (!showAll)
+                {
+                    // 🎯 Sadece bu derse / öğretmene ait MediaCMS Playlist videoları
+                    var playlist = await _mediaCmsService.GetOrCreateCoursePlaylistAsync(course.Id, course.Title, course.CourseCode, teacherName);
+                    var videos = playlist?.PlaylistMedia ?? new List<MediaCmsVideoDto>();
+
+                    return Json(new 
+                    { 
+                        success = true, 
+                        isCoursePlaylist = true, 
+                        playlistTitle = playlist?.Title ?? $"[Ders #{course.Id}] {course.Title}", 
+                        playlistToken = playlist?.FriendlyToken ?? "",
+                        videos 
+                    });
+                }
+                else
+                {
+                    // İsteğe bağlı: Tüm kütüphane görünümü
+                    var allVideos = await _mediaCmsService.GetVideosAsync();
+                    return Json(new { success = true, isCoursePlaylist = false, videos = allVideos });
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AttachMediaCmsVideo(int courseId, int weekNumber, string videoToken, string title)
+        {
+            if (string.IsNullOrWhiteSpace(videoToken))
+            {
+                TempData["ErrorMessage"] = "Geçerli bir video token'ı seçilmedi.";
+                return RedirectToAction("Details", new { id = courseId });
+            }
+
+            try
+            {
+                var course = await _dbContext.Courses
+                    .Include(c => c.Teacher)
+                    .FirstOrDefaultAsync(c => c.Id == courseId);
+
+                if (course != null)
+                {
+                    string teacherName = course.Teacher != null ? $"{course.Teacher.FirstName} {course.Teacher.LastName}".Trim() : "Eğitmen";
+                    string courseCatTitle = $"{course.CourseCode} - {course.Title}".Trim();
+
+                    var playlist = await _mediaCmsService.GetOrCreateCoursePlaylistAsync(course.Id, course.Title, course.CourseCode, teacherName);
+                    if (playlist != null && !string.IsNullOrEmpty(playlist.FriendlyToken))
+                    {
+                        await _mediaCmsService.AddVideoToPlaylistAsync(playlist.FriendlyToken, videoToken.Trim());
+                    }
+
+                    // 🎯 Videoyu dersin MediaCMS kategorisine de bağla
+                    await _mediaCmsService.AttachVideoToCategoryAsync(videoToken.Trim(), courseCatTitle);
+                }
+
+                var lesson = await _dbContext.Lessons
+                    .Include(l => l.Contents)
+                    .FirstOrDefaultAsync(l => l.CourseId == courseId && l.WeekNumber == weekNumber);
+
+                if (lesson == null)
+                {
+                    lesson = new Lesson
+                    {
+                        CourseId = courseId,
+                        WeekNumber = weekNumber,
+                        Title = $"{weekNumber}. Hafta Ders İçerikleri"
+                    };
+                    _dbContext.Lessons.Add(lesson);
+                    await _dbContext.SaveChangesAsync();
+                }
+
+                var videoContent = new LessonContent
+                {
+                    LessonId = lesson.Id,
+                    Title = string.IsNullOrWhiteSpace(title) ? "MediaCMS HLS Dersi" : title,
+                    Type = "Video",
+                    ResourceUrl = videoToken.Trim(),
+                    Text = "MediaCMS Adaptive Bitrate HLS Stream Videosu",
+                    Body = $"http://localhost/embed?m={videoToken.Trim()}",
+                    Order = (lesson.Contents?.Count ?? 0) + 1
+                };
+
+                _dbContext.LessonContents.Add(videoContent);
+                await _dbContext.SaveChangesAsync();
+
+                TempData["SuccessMessage"] = $"MediaCMS videosu {weekNumber}. Hafta ve Ders Oynatma Listesine başarıyla eklendi.";
+            }
+            catch (Exception ex)
+            {
+                TempData["ErrorMessage"] = $"Video bağlanırken hata oluştu: {ex.Message}";
+            }
+
+            return RedirectToAction("Details", new { id = courseId });
+        }
+
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        [RequestSizeLimit(524288000)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
+        public async Task<IActionResult> UploadMediaCmsVideo(int courseId, int weekNumber, IFormFile videoFile, string? title)
+        {
+            if (videoFile == null || videoFile.Length == 0)
+            {
+                TempData["ErrorMessage"] = "Lütfen yüklenecek bir video dosyası seçin.";
+                return RedirectToAction("Details", new { id = courseId });
+            }
+
+            try
+            {
+                var course = await _dbContext.Courses
+                    .Include(c => c.Teacher)
+                    .FirstOrDefaultAsync(c => c.Id == courseId);
+
+                string teacherName = course?.Teacher != null ? $"{course.Teacher.FirstName} {course.Teacher.LastName}".Trim() : "Eğitmen";
+                string videoTitle = string.IsNullOrWhiteSpace(title) 
+                    ? System.IO.Path.GetFileNameWithoutExtension(videoFile.FileName) 
+                    : title;
+
+                var playlist = course != null 
+                    ? await _mediaCmsService.GetOrCreateCoursePlaylistAsync(course.Id, course.Title, course.CourseCode, teacherName) 
+                    : null;
+
+                string categoryTitle = course != null ? $"{course.CourseCode} - {course.Title}".Trim() : string.Empty;
+
+                var uploadedDto = await _mediaCmsService.UploadVideoAsync(
+                    videoFile, 
+                    videoTitle, 
+                    $"MiniLMS {course?.CourseCode} - {weekNumber}. Hafta Videosu",
+                    playlist?.FriendlyToken,
+                    categoryTitle
+                );
+
+                if (uploadedDto != null && !string.IsNullOrEmpty(uploadedDto.FriendlyToken))
+                {
+                    return await AttachMediaCmsVideo(courseId, weekNumber, uploadedDto.FriendlyToken, videoTitle);
+                }
+                else
+                {
+                    TempData["ErrorMessage"] = "Video MediaCMS'e iletilirken bir sorun oluştu. MediaCMS konteynerinin çalıştığından emin olun.";
+                }
+            }
+            catch (Exception ex)
+            {
+                TempData["ErrorMessage"] = $"Video yüklenirken hata oluştu: {ex.Message}";
+            }
+
+            return RedirectToAction("Details", new { id = courseId });
+        }
+
+        [HttpPost]
+        [Authorize(Policy = UserPolicies.TeacherOnly)]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteMediaCmsVideo(int contentId, int courseId)
+        {
+            try
+            {
+                var content = await _dbContext.LessonContents.FindAsync(contentId);
+                if (content != null)
+                {
+                    _dbContext.LessonContents.Remove(content);
+                    await _dbContext.SaveChangesAsync();
+                    TempData["SuccessMessage"] = "Ders videosu başarıyla kaldırıldı.";
+                }
+            }
+            catch (Exception ex)
+            {
+                TempData["ErrorMessage"] = $"Video kaldırılırken hata oluştu: {ex.Message}";
+            }
+
             return RedirectToAction("Details", new { id = courseId });
         }
 

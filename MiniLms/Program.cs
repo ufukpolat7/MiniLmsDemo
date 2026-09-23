@@ -80,6 +80,7 @@ builder.Services.AddScoped<ILessonContentRepository, LessonContentRepository>();
 builder.Services.AddHttpClient<IAiService, AiService>();
 builder.Services.AddHttpClient<IVectorDbService, VectorDbService>();
 builder.Services.AddHttpClient<IAzureSpeechService, AzureSpeechService>();
+builder.Services.AddHttpClient<IMediaCmsService, MediaCmsService>();
 builder.Services.AddHostedService<VectorSyncService>();
 
 // 4. AUTOMAPPER PROFİL HARİTALAMASINI KAYDET (HATAYI ÇÖZEN SATIR)
